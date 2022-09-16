@@ -1,18 +1,26 @@
 from torch_lib import Proxy
 from model.model import Questioner
 import os
-from data.dataset import VQADataset, Tokenizer, TrainImageProcessor, QuestionAnswerProcessor, QuestionCaptionProcessor
+from data.dataset import Tokenizer, build_dataloader, build_dataset
+from utils.loss import Loss
+from torch.optim import Adam
 
-
-# QAs = VQADataset(
-#     TrainImageProcessor(),
-#     QuestionAnswerProcessor('./dataset/VQA/v2_OpenEnded_mscoco_train2014_questions.json', './dataset/VQA/v2_mscoco_train2014_annotations.json', Tokenizer(), mode='all'),
-#     './dataset/COCO/train2014',
-#     'COCO_train2014_'
-# )
-
-
-model = Questioner(Tokenizer().mask_token)
+# tokenizer
+tokenizer = Tokenizer()
+# build and load model
+model = Questioner(tokenizer)
 model.load_pretrained_weights()
-proxy = Proxy(model)
-print('load finished')
+# build dataset
+train_dataset = build_dataloader(build_dataset('answer', 'train', tokenizer), 64)
+val_dataset = build_dataloader(build_dataset('answer', 'val', tokenizer), 64)
+# torch-lib pipeline
+proxy = Proxy(model, 'cuda:0')
+proxy.build(
+    loss=Loss(),
+    optimizer=Adam(model.parameters(), lr=1e-6)
+)
+proxy.train(
+    train_dataset,
+    100,
+    val_dataset
+)

@@ -1,5 +1,5 @@
 from model.bert_tokenizer import BertTokenizer
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from utils import default_config_path, parse_yaml
 from vqa_utils.vqaTools.vqa import VQA
 import os
@@ -29,9 +29,12 @@ class Tokenizer:
         assert self.cls_token == 101 and self.sep_token == 102, 'The cls token or the sep token does not match the correct id.'
 
     def tokenize(self, text: str, max_len: int = None):
+        return self.get_padded_tokens(self.tokenize_without_padding(text), max_len)
+
+    def tokenize_without_padding(self, text):
         tokenized_text = self.tokenizer.tokenize(text)
         tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
-        return self.get_padded_tokens(tokens, max_len)
+        return tokens
     
     def get_padded_tokens(self, tokens, max_len: int = None):
         max_len = max_len if max_len is not None else self.max_len
@@ -51,6 +54,7 @@ class ImageProcessor:
         super().__init__()
         self.mean = [0.48145466, 0.4578275, 0.40821073] 
         self.std  = [0.26862954, 0.26130258, 0.27577711]
+        self.resolution = 480
         self.transforms = NOTHING
     
     def process(self, img):
@@ -63,8 +67,8 @@ class TrainImageProcessor(ImageProcessor):
     
     def __init__(self):
         super().__init__()
-        # RandomResizedCrop(self.resolution, [0.8,1.0],[1.0,1.0])
-        self.transforms = Compose([RandomHorizontalFlip(),
+        self.transforms = Compose([RandomResizedCrop(self.resolution, [0.8,1.0],[1.0,1.0]),
+                                   RandomHorizontalFlip(),
                                    Normalize(self.mean,self.std)])
 
 
@@ -72,9 +76,9 @@ class ValImageProcessor(ImageProcessor):
     
     def __init__(self):
         super().__init__()
-        # Resize(self.resolution),
-        # CenterCrop(self.resolution),
-        self.transforms = Compose([Normalize(self.mean,self.std)])
+        self.transforms = Compose([Resize(self.resolution),
+                                   CenterCrop(self.resolution),
+                                   Normalize(self.mean,self.std)])
 
 
 class TextProcessor:
@@ -90,6 +94,7 @@ class TextProcessor:
         super().__init__()
         self.vqa = VQA(annotation_path, question_path)
         self.ids = self.vqa.getImgIds()
+        self.data_size = len(self.ids)
         self.confident = confident
         self.tokenizer = tokenizer
         
@@ -227,4 +232,22 @@ class VQADataset(Dataset):
         return (imgs, tips, targets), targets
 
     def __len__(self):
-        return len(self.ids)
+        return self.text_processor.data_size
+
+
+def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer):
+    img_processor_dict = {
+        'train': TrainImageProcessor,
+        'val': ValImageProcessor
+    }
+    config = parse_yaml(default_config_path)
+    # mode: train / val
+    items = config[mode]
+    # text processor
+    text_processor = QuestionAnswerProcessor(items['question'], items['annotation'], tokenizer) if dataset_type == 'answer' else \
+        QuestionCaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer)
+    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'])
+
+
+def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)

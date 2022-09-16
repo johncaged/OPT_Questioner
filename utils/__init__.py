@@ -8,3 +8,7 @@ def parse_yaml(path):
 
 
 default_config_path = './checkpoint/load.yml'
+
+
+def ToCuda(item):
+    return item.to('cuda:0')

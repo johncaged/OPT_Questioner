@@ -11,4 +11,4 @@ default_config_path = './checkpoint/load.yml'
 
 
 def ToCuda(item):
-    return item.to('cuda:0')
+    return item.cuda()

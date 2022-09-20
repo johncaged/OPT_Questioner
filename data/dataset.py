@@ -10,6 +10,8 @@ import numpy as np
 from torchvision.transforms import *
 from torch_lib.util import NOTHING
 import json
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
 
 
 class Tokenizer:
@@ -19,7 +21,7 @@ class Tokenizer:
         # max text length
         self.max_len = max_len
         config = parse_yaml(config_path)
-        self.tokenizer = BertTokenizer(os.path.join(config['initial_path'], config['bert_covab_path']))
+        self.tokenizer = BertTokenizer(os.path.join(config['initial_path'], config['bert_vocab_path']))
         
         # get cls token and sep token
         self.cls_token = self.tokenizer.convert_tokens_to_ids(['[CLS]'])[0]
@@ -93,7 +95,7 @@ class TextProcessor:
     ):
         super().__init__()
         self.vqa = VQA(annotation_path, question_path)
-        self.ids = self.vqa.getImgIds()
+        self.ids = list(set(self.vqa.getImgIds()))
         self.data_size = len(self.ids)
         self.confident = confident
         self.tokenizer = tokenizer
@@ -128,7 +130,7 @@ class QuestionAnswerProcessor(TextProcessor):
         questions, answers = None, None
         # image -> n * questions -> n * m answers
         if self.mode == 'once':
-            # random selece 1 question from n questions
+            # random select 1 question from n questions
             q_id = random.choice(question_ids)
             questions, answers = self.get_multiple_pairs([q_id])
         elif self.mode == 'all':
@@ -174,7 +176,7 @@ class QuestionCaptionProcessor(TextProcessor):
         
         # image -> n * questions & m captions
         if self.mode == 'once':
-            # random selece 1 question from n questions
+            # random select 1 question from n questions
             q_id = random.choice(question_ids)
             questions, captions = self.get_multiple_pairs([q_id], img_captions)
         elif self.mode == 'all':
@@ -203,13 +205,15 @@ class VQADataset(Dataset):
         image_processor: ImageProcessor,
         text_processor: TextProcessor,
         image_path: str,
-        image_prefix: str
+        image_prefix: str,
+        auto_regressive: bool = False
     ):
         super().__init__()
         self.image_path = image_path
         self.image_prefix = image_prefix
         self.image_processor = image_processor
         self.text_processor = text_processor
+        self.auto_regressive = auto_regressive
 
     def __getitem__(self, index):
         # get image
@@ -228,14 +232,14 @@ class VQADataset(Dataset):
             tips = torch.cat(tips, dim=0)
         # batch, time, channel, height, width
         imgs = img.repeat(targets.size()[0], *([1] * 4))
-        # WARNING: the two targets variable are in the same memory address.
-        return (imgs, tips, targets), targets
+        # WARNING: the two targets variable are referring to the same memory address.
+        return {'imgs': imgs, 'tips': tips, 'targets': targets, 'auto_regressive': self.auto_regressive}, targets, [str(image_id)] * targets.size()[0]
 
     def __len__(self):
         return self.text_processor.data_size
 
 
-def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer):
+def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer, auto_regressive: bool = False, text_mode: str = 'once'):
     img_processor_dict = {
         'train': TrainImageProcessor,
         'val': ValImageProcessor
@@ -244,10 +248,30 @@ def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer):
     # mode: train / val
     items = config[mode]
     # text processor
-    text_processor = QuestionAnswerProcessor(items['question'], items['annotation'], tokenizer) if dataset_type == 'answer' else \
-        QuestionCaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer)
-    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'])
+    text_processor = QuestionAnswerProcessor(items['question'], items['annotation'], tokenizer, text_mode) if dataset_type == 'answer' else \
+        QuestionCaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer, text_mode)
+    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'], auto_regressive)
+
+
+class CustomDistributedSampler(DistributedSampler):
+
+    def __iter__(self):
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))
+
+        if self.drop_last:
+            indices = indices[:self.total_size]
+        indices = indices[self.rank:len(indices):self.num_replicas]
+        return iter(indices)
 
 
 def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    config = parse_yaml(default_config_path)
+    batch_size = batch_size // dist.get_world_size()
+    sampler = CustomDistributedSampler(dataset)
+    return DataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=config['num_workers'], pin_memory=config['pin_memory'])

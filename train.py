@@ -3,24 +3,76 @@ from model.model import Questioner
 import os
 from data.dataset import Tokenizer, build_dataloader, build_dataset
 from utils.loss import Loss
+from utils import parse_yaml, default_config_path
 from torch.optim import Adam
+import torch.distributed as dist
+from apex.parallel import DistributedDataParallel as DDP
+import torch
+from apex import amp
+from torch_lib.log.directory import set_base_path, set_namespace
+import argparse
+from utils.callbacks import MyCallback
+from utils.handlers import set_handler
 
-# tokenizer
-tokenizer = Tokenizer()
-# build and load model
-model = Questioner(tokenizer)
-model.load_pretrained_weights()
-# build dataset
-train_dataset = build_dataloader(build_dataset('answer', 'train', tokenizer), 64)
-val_dataset = build_dataloader(build_dataset('answer', 'val', tokenizer), 64)
-# torch-lib pipeline
-proxy = Proxy(model, 'cuda:0')
-proxy.build(
-    loss=Loss(),
-    optimizer=Adam(model.parameters(), lr=1e-6)
-)
-proxy.train(
-    train_dataset,
-    100,
-    val_dataset
-)
+config = parse_yaml(default_config_path)
+set_base_path(config['base_path'])
+set_namespace(config['namespace'])
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--local_rank', type=int, default=-1)
+    parser.add_argument('--fp16', action='store_true')
+    return parser.parse_args()
+
+
+def main():
+    args = get_args()
+    
+    # parallel
+    dist.init_process_group('nccl')
+    rank = dist.get_rank()
+    torch.cuda.set_device(rank)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.enabled = True
+
+    # tokenizer
+    tokenizer = Tokenizer()
+    # build and load model
+    model = Questioner(tokenizer)
+    model.load_pretrained_weights()
+    # optimizer
+    optimizer = Adam(model.parameters(), lr=1e-6)
+    
+    # create model and move it to GPU with id rank
+    device_id = rank % torch.cuda.device_count()
+    model, optimizer = amp.initialize(model.to(device_id), optimizer, enabled=args.fp16, opt_level='O2')
+    model = DDP(model)
+    
+    # resume
+    # checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
+    # model.load_state_dict(checkpoint['model'])
+    # optimizer.load_state_dict(checkpoint['optimizer'])
+    # del checkpoint
+    
+    # build dataset
+    train_dataset = build_dataloader(build_dataset('answer', 'train', tokenizer), 48)
+    val_dataset = build_dataloader(build_dataset('answer', 'val', tokenizer), 48)
+    # torch-lib pipeline
+    proxy = Proxy(model)
+    set_handler(proxy)
+    proxy.count_params('M')
+    proxy.build(
+        loss=Loss(),
+        optimizer=optimizer
+    )
+    proxy.train(
+        train_dataset,
+        10,
+        val_dataset,
+        callbacks=MyCallback()
+    )
+
+
+if __name__ == '__main__':
+    main()

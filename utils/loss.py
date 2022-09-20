@@ -12,7 +12,7 @@ class Loss(nn.Module):
         # y_true is not used.
         prediction_scores, labels = y_pred
         loss = F.cross_entropy(prediction_scores,
-                               labels[labels != -1],
+                               labels,
                                reduction='none')
         if self.label_smoothing > 0:
             smooth_loss = -F.log_softmax(prediction_scores, dim=-1).mean(dim=-1)

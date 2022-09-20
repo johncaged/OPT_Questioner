@@ -1,0 +1,56 @@
+Image: 258350 - Answer: yes - Question: are there people ? - Output: is it night time ?
+Image: 258350 - Answer: yellow and red - Question: what colors is the sign ? - Output: what color is the sign ?
+Image: 258350 - Answer: yes - Question: is the bus stopped ? - Output: is it night time ?
+Image: 258350 - Answer: 54 - Question: what numbers appear on the front of the bus ? - Output: what number is on the bus ?
+Image: 258350 - Answer: double decker - Question: what type of bus is this ? - Output: what type of bus is this ?
+Image: 258350 - Answer: no - Question: is this picture in motion ? - Output: is the bus moving ?
+Image: 518850 - Answer: 3 - Question: how many cars are in the photo ? - Output: how many motorcycles are there ?
+Image: 518850 - Answer: head ##light - Question: do we see the motorcycle ' s head ##light or tail light ? - Output: what is on the motorcycle ?
+Image: 518850 - Answer: yes - Question: is the guy on the bike a policeman ? - Output: is the motorcycle moving ?
+Image: 518850 - Answer: motorcycle - Question: what kind of vehicle is this ? - Output: what is the man riding ?
+Image: 518850 - Answer: no - Question: is this a train station ? - Output: is the motorcycle moving ?
+Image: 518850 - Answer: very light - Question: how is traffic ? - Output: how bright is the motorcycle ?
+Image: 39484 - Answer: no - Question: is it snow ##ing out ? - Output: is it daytime ?
+Image: 39484 - Answer: yes - Question: are there cars in the picture ? - Output: is it daytime ?
+Image: 39484 - Answer: for lease - Question: what is written on the white mar ##que ##e ? - Output: what does the sign say ?
+Image: 469609 - Answer: yes - Question: is there a sign in the photo ? - Output: are there any cars ?
+Image: 469609 - Answer: enter - Question: what does the left sign tell you not to do ? - Output: what does the sign say ?
+Image: 469609 - Answer: no - Question: are the letters wrote in english type ? - Output: are there any cars ?
+Image: 432763 - Answer: no - Question: is this a park ? - Output: are the birds flying ?
+Image: 432763 - Answer: boat - Question: what is in the water ? - Output: what is in the water ?
+Image: 432763 - Answer: no - Question: are all the birds flying ? - Output: are the birds flying ?
+Image: 129663 - Answer: man - Question: which player is closer to the net ? - Output: who is holding the rack ##et ?
+Image: 129663 - Answer: tennis - Question: what tournament is being played ? - Output: what sport are they playing ?
+Image: 129663 - Answer: no - Question: are the woman ' s feet on the ground ? - Output: is this a professional tennis match ?
+Image: 113745 - Answer: yes - Question: is the pizza pepper ##oni ? - Output: is the pizza cooked ?
+Image: 113745 - Answer: no - Question: would a vegetarian eat this ? - Output: is the pizza cooked ?
+Image: 113745 - Answer: pepper ##oni - Question: what type of pizza is this ? - Output: what is on the pizza ?
+Image: 113745 - Answer: yes - Question: has the pizza in the front been cut ? - Output: is the pizza cooked ?
+Image: 113745 - Answer: no - Question: does one of the plates contain breakfast foods ? - Output: is the pizza cooked ?
+Image: 113745 - Answer: yes - Question: does this food contain vegetables ? - Output: is the pizza cooked ?
+Image: 574216 - Answer: stop attack on worker rights - Question: what does the sign say ? - Output: what does the sign say ?
+Image: 574216 - Answer: on worker rights - Question: what attack should be stopped ? - Output: what does the sign say ?
+Image: 574216 - Answer: yes - Question: does this person support worker rights ? - Output: is the sign ?
+Image: 190372 - Answer: 0 - Question: how many empty seats are at the front table ? - Output: how many people are at the table ?
+Image: 190372 - Answer: yellow - Question: what color is the person in front top ? - Output: what color is her shirt ?
+Image: 190372 - Answer: 5 - Question: how many glasses are there ? - Output: how many people are at the table ?
+Image: 190372 - Answer: red - Question: what color is the chair ? - Output: what color is the lamp ?
+Image: 190372 - Answer: milk - Question: what is in the glass ? - Output: what is in the glass ?
+Image: 190372 - Answer: 5 - Question: how many people are sitting around the table ? - Output: how many people are at the table ?
+Image: 190372 - Answer: no - Question: are all of the chairs occupied ? - Output: is this a restaurant ?
+Image: 190372 - Answer: 5 - Question: how many people appear to be dining ? - Output: how many people are at the table ?
+Image: 190372 - Answer: no - Question: is this a cooking class ? - Output: is this a restaurant ?
+Image: 190372 - Answer: no - Question: are some of them drinking wine ? - Output: is this a restaurant ?
+Image: 190372 - Answer: no - Question: is this a family gathering or a business lunch ##eon ? - Output: is this a restaurant ?
+Image: 190372 - Answer: yes - Question: is the kid male ? - Output: is this a restaurant ?
+Image: 190372 - Answer: red - Question: what color is the lamp ? - Output: what color is the lamp ?
+Image: 190372 - Answer: no - Question: is there a person sleeping ? - Output: is this a restaurant ?
+Image: 190372 - Answer: 2 - Question: how many people wear brace ##s ? - Output: how many people are at the table ?
+Image: 190372 - Answer: no - Question: is the child asian ? - Output: is this a restaurant ?
+Image: 190372 - Answer: yes - Question: have these ladies been having a conversation ? - Output: is this a restaurant ?
+Image: 190372 - Answer: no - Question: are they studying ? - Output: is this a restaurant ?
+Image: 190372 - Answer: yes - Question: are there adults at the table ? - Output: is this a restaurant ?
+Image: 190372 - Answer: no - Question: is the average age of the people shown over 40 ? - Output: is this a restaurant ?
+Image: 164389 - Answer: 11 - Question: how many people are on the boat ? - Output: how many people are in the boat ?
+Image: 164389 - Answer: in crowd - Question: where is the umbrella ? - Output: where is the boat ?
+Image: 164389 - Answer: red - Question: what color shorts are the men in the boat wearing ? - Output: what color are the shorts ?

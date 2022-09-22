@@ -43,7 +43,7 @@ def main():
     model = Questioner(tokenizer)
     model.load_pretrained_weights()
     # optimizer
-    optimizer = Adam(model.parameters(), lr=1e-5)
+    optimizer = Adam(model.parameters(), lr=3e-6)
     
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()

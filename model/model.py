@@ -272,7 +272,10 @@ class QuestionerGenerator(Questioner):
         txt_tokens = torch.cat((bos_token, txt_tokens), dim=1)
         
         batch['targets'] = txt_tokens
-        return self(batch)[0]
+        return super().__call__(batch)[0]
+
+    def __call__(self, *args, **kwargs):
+        return self.decode_beam(*args, **kwargs)
 
     def decode_beam(self, batch):
         batch = self.reshape_tensor(batch)

@@ -69,18 +69,19 @@ class TrainImageProcessor(ImageProcessor):
     
     def __init__(self):
         super().__init__()
-        self.transforms = Compose([RandomResizedCrop(self.resolution, [0.8,1.0],[1.0,1.0]),
-                                   RandomHorizontalFlip(),
-                                   Normalize(self.mean,self.std)])
+        self.transforms = Compose([Resize((self.resolution, self.resolution)),
+                                #    RandomResizedCrop(self.resolution, [0.8,1.0],[1.0,1.0]),
+                                #    RandomHorizontalFlip(),
+                                   Normalize(self.mean, self.std)])
 
 
 class ValImageProcessor(ImageProcessor):
     
     def __init__(self):
         super().__init__()
-        self.transforms = Compose([Resize(self.resolution),
-                                   CenterCrop(self.resolution),
-                                   Normalize(self.mean,self.std)])
+        self.transforms = Compose([Resize((self.resolution, self.resolution)),
+                                #    CenterCrop(self.resolution),
+                                   Normalize(self.mean, self.std)])
 
 
 class TextProcessor:
@@ -120,12 +121,15 @@ class QuestionAnswerProcessor(TextProcessor):
     """Get question-answer pair for question generation.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, multiple_choice_answer: bool = True, quesTypes: list = [], ansTypes: list = [], *args, **kwargs):
         super().__init__(*args, **kwargs)
-    
+        self.multiple_choice_answer = multiple_choice_answer
+        self.quesTypes = quesTypes
+        self.ansTypes = ansTypes
+
     def process(self, image_id, image_name):
         # get questions
-        question_ids = self.vqa.getQuesIds(imgIds=image_id)
+        question_ids = self.vqa.getQuesIds(imgIds=image_id, quesTypes=self.quesTypes, ansTypes=self.ansTypes)
         
         questions, answers = None, None
         # image -> n * questions -> n * m answers
@@ -143,17 +147,25 @@ class QuestionAnswerProcessor(TextProcessor):
         
         for q_id in q_ids:
             temp = self.vqa.loadQA(q_id)[0]
-            question, answer = self.get_single_pair(self.vqa.qqa[q_id]['question'], temp['answers'])
+            # choose the most frequent answer
+            if self.multiple_choice_answer is True:
+                question, answer = self.get_single_pair(self.vqa.qqa[q_id]['question'], temp['multiple_choice_answer'])
+            else:
+                question, answer = self.get_single_pair(self.vqa.qqa[q_id]['question'], temp['answers'])
             questions.append(question)
             answers.append(answer)
         return questions, answers
     
     def get_single_pair(self, question, answers):
-        if self.confident:
-            temp = filter(lambda answer: answer.answer_confidence == 'yes', answers)
-            if len(temp) >= 1:
-                answers = temp
-        answer = random.choice(answers)
+        # choose the most frequent answer
+        if self.multiple_choice_answer is True:
+            answer = {'answer': answers}
+        else:
+            if self.confident:
+                temp = filter(lambda answer: answer.answer_confidence == 'yes', answers)
+                if len(temp) >= 1:
+                    answers = temp
+            answer = random.choice(answers)
         return self.get_tokenized_text_pair(question, answer['answer'])
 
 
@@ -239,7 +251,17 @@ class VQADataset(Dataset):
         return self.text_processor.data_size
 
 
-def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer, auto_regressive: bool = False, text_mode: str = 'once'):
+def build_dataset(
+    dataset_type: str,
+    mode: str,
+    tokenizer: Tokenizer,
+    auto_regressive: bool = False,
+    text_mode: str = 'once',
+    confident: bool = False,
+    multiple_choice_answer: bool = True,
+    quesTypes: list = [],
+    ansTypes: list = []
+):
     img_processor_dict = {
         'train': TrainImageProcessor,
         'val': ValImageProcessor
@@ -248,7 +270,7 @@ def build_dataset(dataset_type: str, mode: str, tokenizer: Tokenizer, auto_regre
     # mode: train / val
     items = config[mode]
     # text processor
-    text_processor = QuestionAnswerProcessor(items['question'], items['annotation'], tokenizer, text_mode) if dataset_type == 'answer' else \
+    text_processor = QuestionAnswerProcessor(multiple_choice_answer, quesTypes, ansTypes, items['question'], items['annotation'], tokenizer, text_mode, confident) if dataset_type == 'answer' else \
         QuestionCaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer, text_mode)
     return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'], auto_regressive)
 

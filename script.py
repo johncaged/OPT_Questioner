@@ -1,23 +1,29 @@
-from data.dataset import Tokenizer
+from vqa_utils.vqaTools.vqa import VQA
+from utils import parse_yaml, default_config_path
 
 
-tokenizer = Tokenizer()
-print(tokenizer.mask_token)
-print(tokenizer.sep_token)
-print(tokenizer.cls_token)
-print(tokenizer.tokenizer.convert_ids_to_tokens([2024,  2119, 15220,  3221,  1029,   102]))
-print(tokenizer.tokenizer.convert_ids_to_tokens([2029,  2192,  2038,  1037,  7223, 12733,  1029,   102]))
-print(tokenizer.tokenizer.convert_ids_to_tokens([2054,  2003,  1999,  1996,  6379,  4951,  2327,  4147,  2711, 1005,  1055,  2157,  2192,  1029,   102]))
-print(tokenizer.tokenizer.convert_ids_to_tokens([2129,  2116, 26191,  2024,  2045,  1029,   102,  2003,  1996, 11389,                                                                                                             
-         4562,  3201,  2005,  1037, 18996,  1029,   102,  2065,  2619,  2001,                                                                                                                    
-         3061,  1999,  1996,  6457,  1010,  2052,  2017,  2022,  2583,  2000,                                                                                                                    
-         2156,  2068,  1029,   102,  2073,  2003,  2023,  3861,  2579,  1029,                                                                                                                    
-          102,  2003,  2009, 24057,  2182,  1029,   102,  2003,  2023, 11967,                                                                                                                    
-         6413,  2005, 15400, 17188,  1029,   102,  2073,  2003,  1996,  2775,                                                                                                                    
-         3061,  1029,   102,  2129,  2116,  2111,  2024,  3491,  2182,  1029,                                                                                                                    
-          102,  2054,  2024,  1996, 12277, 17125,  2081,  1997,  1029,   102,                                                                                                                    
-         2040,  2003,  3173,  1996,  2452,  1029,   102,  2129,  2116, 18105,                                                                                                                    
-         2024,  2182,  1029,   102,  2054,  3609,  2024,  1996,  7945,  1005,                                                                                                                    
-         1055,  3797, 15114,  1029,   102,  2054,  2003,  2023,  2711,  5983,                                                                                                                    
-         1029,   102,  2054,  2003,  2006,  1996,  2450,  1005,  1055,  2132,                                                                                                                    
-         1029,   102,  2054,  2515,  1996,  2417,  3696,  2360,  1029,   102]))
+def main():
+    config = parse_yaml(default_config_path)
+
+    question_type = set()
+    answer_type = set()
+    
+    def count(annotation, question):
+        vqa = VQA(annotation, question)
+        ids = list(set(vqa.getImgIds()))
+        for _id in ids:
+            q_ids = vqa.getQuesIds(_id, ansTypes=['number', 'other'])
+            for q_id in q_ids:
+                item = vqa.loadQA(q_id)[0]
+                question_type.add(item['question_type'])
+                answer_type.add(item['answer_type'])
+
+    count(config['train']['annotation'], config['train']['question'])
+    count(config['val']['annotation'], config['val']['question'])
+    
+    print(question_type)
+    print(answer_type)
+
+
+if __name__ == '__main__':
+    main()

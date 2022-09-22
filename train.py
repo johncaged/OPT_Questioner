@@ -13,6 +13,7 @@ from torch_lib.log.directory import set_base_path, set_namespace
 import argparse
 from utils.callbacks import MyCallback
 from utils.handlers import set_handler
+from torch.optim.lr_scheduler import LambdaLR
 
 config = parse_yaml(default_config_path)
 set_base_path(config['base_path'])
@@ -42,7 +43,7 @@ def main():
     model = Questioner(tokenizer)
     model.load_pretrained_weights()
     # optimizer
-    optimizer = Adam(model.parameters(), lr=1e-6)
+    optimizer = Adam(model.parameters(), lr=1e-5)
     
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()
@@ -62,13 +63,15 @@ def main():
     proxy = Proxy(model)
     set_handler(proxy)
     proxy.count_params('M')
+    total_epoch = 20
     proxy.build(
         loss=Loss(),
-        optimizer=optimizer
+        optimizer=optimizer,
+        lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: (1 - epoch / total_epoch) ** 0.9)
     )
     proxy.train(
         train_dataset,
-        10,
+        total_epoch,
         val_dataset,
         callbacks=MyCallback()
     )

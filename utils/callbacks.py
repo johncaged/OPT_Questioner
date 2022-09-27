@@ -11,7 +11,7 @@ class MyCallback(Callback):
         if self.rank == 0:
             self.callback = CallbackContainer([
                 SaveMetrics(),
-                SaveCheckpoint(1, 'checkpoint.pt', save_optimizer=True, save_epoch=True)
+                SaveCheckpoint(1, save_optimizer=True, save_epoch=True)
             ])
     
     def epoch_end(self, ctx):

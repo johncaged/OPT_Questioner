@@ -421,7 +421,7 @@ class CLIP(nn.Module):
 
         #x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
 
-        return input_feat
+        return input_feat, txt_tokens
 
     def forward(self, image, text):
         image_features = self.encode_image(image)

@@ -1,4 +1,4 @@
-from model.model import QuestionerGenerator, ModelWrapper
+from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, TextSampler, TopKSampler, BeamSampler
 from data.dataset import Tokenizer, build_dataset
 from torch.utils.data import DataLoader
 from utils import ToCuda
@@ -14,16 +14,18 @@ def main():
         # tokenizer
         tokenizer = Tokenizer()
         # build and load model
-        model = QuestionerGenerator(tokenizer=tokenizer)
+        model = BaseQuestioner(tokenizer, QuestionerWithAnswer(), auto_regressive=True)
         model = ModelWrapper(model)
         checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
         model.load_state_dict(checkpoint['model'])
         model.eval()
         del checkpoint
-        model: QuestionerGenerator = ToCuda(model.module)
-        val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, True, 'all'), batch_size=1, shuffle=True)
+        model: TextSampler = ToCuda(TopKSampler(model.module))
+        # val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
+        val_dataset = DataLoader(build_dataset('caption', 'val', tokenizer, 'all', text_encoder=model.module.clip), batch_size=1, shuffle=True)
         
-        max_iter = 20
+        max_iter = 1
+        repeat_sample = 10
         for i, batch in enumerate(val_dataset):
             tip = torch.flatten(batch[0]['tips'], start_dim=0, end_dim=1)
             target = torch.flatten(batch[1], start_dim=0, end_dim=1)
@@ -34,25 +36,27 @@ def main():
             if img[0] in all_images['images']:
                 max_iter += 1
                 continue
-
-            prediction = model(batch[0])
-        
-            detach = lambda x: x.detach().cpu().tolist()
-
-            for answer, question, output, image in zip(convert_items(detach(tip), tokenizer),
-                                                       convert_items(detach(target), tokenizer),
-                                                       convert_items(detach(prediction), tokenizer),
-                                                       img):
-                append_to_file('result.txt', ('Image: {0} - Answer: {1} - Question: {2} - Output: {3}\n'.format(
-                    image,
-                    answer,
-                    question,
-                    output
-                )))
             
+            for _ in range(repeat_sample):
+                prediction = model(batch[0])
+            
+                detach = lambda x: x.detach().cpu().tolist()
+
+                for answer, question, output, image in zip(convert_items(detach(tip), tokenizer),
+                                                        convert_items(detach(target), tokenizer),
+                                                        convert_items(detach(prediction), tokenizer),
+                                                        img):
+                    append_to_file('result.txt', ('Image: {0} - Answer: {1} - Question: {2} - Output: {3}\n'.format(
+                        image,
+                        answer,
+                        question,
+                        output
+                    )))
+                append_to_file('result.txt', 'sample-----------\n')
+
             items = map(lambda x: int(x), list(set(img)))
             all_images['images'].extend(items)
-            print(list(items))
+
             with open('images.json', 'w') as f:
                 json.dump(all_images, f, indent=4)
 

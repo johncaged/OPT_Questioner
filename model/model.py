@@ -12,81 +12,20 @@ import numpy as np
 import random
 import torch.nn.functional as F
 from utils import ToCuda
+from torch_lib.util import NOTHING
 
 
-class Questioner(nn.Module):
-
-    def __init__(self, tokenizer: Tokenizer, config_path=default_config_path):
+class QuestionerModule(nn.Module):
+    """
+    Questioner Module used to setup model structure and load pretrained weights.
+    """
+    
+    def __init__(self, config_path=default_config_path):
         super().__init__()
         self.video_dim = 1024
         self.multimodal_dim = 768
         self.build_model_structure(config_path=config_path)
-        self.masker = TokenMasker(mask_token=tokenizer.mask_token, range_start=106, range_end=30522)
-        self.tokenizer = tokenizer
-
-    def forward(self, batch):
-        batch = self.reshape_tensor(batch)
-        img, tip, target, auto_regressive = ToCuda(batch['imgs']), ToCuda(batch['tips']), ToCuda(batch['targets']), batch['auto_regressive']
-        auto_regressive = torch.all(auto_regressive == False).item() is False
-
-        if auto_regressive is False:
-            # random mask to the target(also called 'question')
-            target, labels = self.masker(target, 0.6)
-
-        output_txt = self.video_language_process(img, tip, target)
-
-        if auto_regressive is False:
-            output_txt = output_txt[labels != -1]
-        else:
-            output_txt = output_txt[:, -1]
-
-        prediction_scores = self.cls_head(output_txt)
-        return prediction_scores, (labels[labels != -1] if auto_regressive is False else None)
     
-    def video_language_process(self, img, tip, target):
-        # get encoded and embedded img features
-        video_input = self.forward_video(img)
-        video_input = self.get_video_multimodal_embedding(video_input)
-        # TODO: soft prompt
-        # get task prompt
-        batch_size = target.shape[0]
-        task_prompt = self.get_task_prompt('question generation with visual and answer cues', batch_size)
-        task_prompt = torch.cat((tip[:, 0:1], task_prompt, tip[:, 1:]), dim=1)
-        # forward multimodal
-        original_output = self.bert(target, task_prompt, video_input, None, casual=True)
-        output_txt = original_output[:, :target.shape[1], :]
-        return output_txt
-    
-    def reshape_tensor(self, batch):
-        if 'imgs' in batch and len(batch['imgs'].size()) > 5:
-            batch['imgs'] = torch.flatten(batch['imgs'], start_dim=0, end_dim=1)
-        if 'tips' in batch and len(batch['tips'].size()) > 2:
-            batch['tips'] = torch.flatten(batch['tips'], start_dim=0, end_dim=1)
-        if 'targets' in batch and len(batch['targets'].size()) > 2:
-            batch['targets'] = torch.flatten(batch['targets'], start_dim=0, end_dim=1)
-        return batch
-    
-    def get_task_prompt(self, content, batch_size):
-        prompt = self.tokenizer.tokenize_without_padding(content)
-        # TODO: optimize
-        return ToCuda(torch.tensor(prompt).unsqueeze(0).expand(batch_size, -1).long())
-    
-    def forward_video(self, video):
-        b, n, _, h, w = video.shape
-        video_output = self.clip.encode_image(video.reshape(b * n, 3, h, w))
-        video_output = video_output.reshape(b, -1, *video_output.shape[-2:])
-        return video_output
-
-    def get_video_multimodal_embedding(self, video):
-        b, n, x, c = video.shape
-       
-        if hasattr(self, 'video_feature_adapter'):
-            video = self.video_feature_adapter(video)
-        video = video + self.video_frame_embedding[:, :video.shape[1], :].unsqueeze(-2)
-        video = video.reshape(b, -1, self.multimodal_dim)
-        video = video + self.video_type_embedding
-        return video
-
     def build_model_structure(self, config_path=default_config_path):
         """Build model structure using clip initial weight and bert initial weight.
 
@@ -189,6 +128,118 @@ class Questioner(nn.Module):
         del bert_weight, cls_head_weight
 
 
+class BaseQuestioner(QuestionerModule):
+    """
+    Base Questioner used to define general operations such as decoding output logits to text and embedding video inputs, etc.
+    """
+    
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        questioner_adapter,
+        auto_regressive: bool = False,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.masker = TokenMasker(mask_token=tokenizer.mask_token, range_start=106, range_end=30522)
+        self.tokenizer = tokenizer
+        self.questioner_adapter = questioner_adapter
+        self.auto_regressive = auto_regressive
+    
+    def reshape_tensor(self, batch):
+        if 'imgs' in batch and len(batch['imgs'].size()) > 5:
+            batch['imgs'] = torch.flatten(batch['imgs'], start_dim=0, end_dim=1)
+        if 'tips' in batch and len(batch['tips'].size()) > 2:
+            batch['tips'] = torch.flatten(batch['tips'], start_dim=0, end_dim=1)
+        if 'targets' in batch and len(batch['targets'].size()) > 2:
+            batch['targets'] = torch.flatten(batch['targets'], start_dim=0, end_dim=1)
+        return batch
+    
+    def get_task_prompt(self, content, batch_size):
+        prompt = self.tokenizer.tokenize_without_padding(content)
+        return ToCuda(torch.tensor(prompt).unsqueeze(0).expand(batch_size, -1).long())
+    
+    def forward_video(self, video):
+        b, n, _, h, w = video.shape
+        video_output = self.clip.encode_image(video.reshape(b * n, 3, h, w))
+        video_output = video_output.reshape(b, -1, *video_output.shape[-2:])
+        return video_output
+
+    def get_video_multimodal_embedding(self, video):
+        b, n, x, c = video.shape
+       
+        if hasattr(self, 'video_feature_adapter'):
+            video = self.video_feature_adapter(video)
+        video = video + self.video_frame_embedding[:, :video.shape[1], :].unsqueeze(-2)
+        video = video.reshape(b, -1, self.multimodal_dim)
+        video = video + self.video_type_embedding
+        return video
+
+    def forward(self, batch):
+        batch = self.reshape_tensor(batch)
+        img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips']), ToCuda(batch['targets'])
+
+        if self.auto_regressive is False:
+            # random mask to the target(also called 'question')
+            target, labels = self.masker(target, 0.6)
+
+        output_txt = self.video_language_process(img, tip, target)
+
+        if self.auto_regressive is False:
+            output_txt = output_txt[labels != -1]
+        else:
+            output_txt = output_txt[:, -1]
+
+        prediction_scores = self.cls_head(output_txt)
+        return prediction_scores, (labels[labels != -1] if self.auto_regressive is False else None)
+
+    def video_language_process(self, img, tip, target):
+        # get encoded and embedded img features
+        video_input = self.forward_video(img)
+        video_input = self.get_video_multimodal_embedding(video_input)
+        # get task prompt
+        batch_size = target.shape[0]
+        task_prompt = self.get_task_prompt(self.questioner_adapter.get_task(), batch_size)
+        task_prompt = torch.cat((tip[:, 0:1], task_prompt, tip[:, 1:]), dim=1)
+        # forward multimodal
+        original_output = self.bert(target, task_prompt, video_input, None, casual=True)
+        output_txt = original_output[:, :target.shape[1], :]
+        return output_txt
+
+    def get_logits(self, batch, state):
+        batch_size = self.get_batch_size(batch)
+        
+        masked_tokens = ToCuda(torch.zeros(batch_size, 1, dtype=torch.long)).fill_(self.tokenizer.mask_token)
+        bos_token = ToCuda(torch.zeros(batch_size, 1, dtype=torch.long)).fill_(self.tokenizer.cls_token)
+        txt_tokens = torch.cat((state, masked_tokens), dim=1) if state is not None else masked_tokens
+        txt_tokens = torch.cat((bos_token, txt_tokens), dim=1)
+        
+        batch['targets'] = txt_tokens
+        return self(batch)[0]
+    
+    def get_batch_size(self, batch):
+        return batch['imgs'].shape[0]
+
+
+class QuestionerWithAnswer:
+    
+    def __init__(self):
+        super().__init__()
+    
+    def get_task(self):
+        return 'question generation with visual and answer cues'
+
+
+class QuestionerWithCaption:
+
+    def __init__(self):
+        super().__init__()
+    
+    def get_task(self):
+        return 'question generation with visual and caption cues'
+
+
 class PredictionHead(nn.Module):
     """Prediction output head that transforms feature vector to vocabulary scores.
     """
@@ -257,33 +308,39 @@ class TokenMasker(nn.Module):
         return tokens, labels
 
 
-class QuestionerGenerator(Questioner):
+class TextSampler(nn.Module):
     
-    def __init__(self, beam_size=3, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, module: BaseQuestioner):
+        super().__init__()
+        self.module: BaseQuestioner = module
+    
+    def sample(self, batch):
+        pass
+    
+    def forward(self, batch):
+        return self.sample(batch)
+
+    def clone_batch(self, batch):
+        item = {}
+        for key, value in batch.items():
+            item[key] = value.clone() if torch.is_tensor(value) else value
+        return item
+
+
+class BeamSampler(TextSampler):
+    
+    def __init__(self, module, beam_size=3):
+        super().__init__(module)
         self.beam_size = beam_size
-
-    def get_logits(self, batch, state):
-        batch_size = self.get_batch_size(batch)
-        
-        masked_tokens = ToCuda(torch.zeros(batch_size, 1, dtype=torch.long)).fill_(self.tokenizer.mask_token)
-        bos_token = ToCuda(torch.zeros(batch_size, 1, dtype=torch.long)).fill_(self.tokenizer.cls_token)
-        txt_tokens = torch.cat((state, masked_tokens), dim=1) if state is not None else masked_tokens
-        txt_tokens = torch.cat((bos_token, txt_tokens), dim=1)
-        
-        batch['targets'] = txt_tokens
-        return super().__call__(batch)[0]
-
-    def __call__(self, *args, **kwargs):
-        return self.decode_beam(*args, **kwargs)
-
-    def decode_beam(self, batch):
-        batch = self.reshape_tensor(batch)
+    
+    def sample(self, batch):
+        batch = self.clone_batch(batch)
+        batch = self.module.reshape_tensor(batch)
         
         max_generation_len = 30
 
         beam_size = self.beam_size
-        batch_size = self.get_batch_size(batch)
+        batch_size = self.module.get_batch_size(batch)
         seq_logprob = ToCuda(torch.zeros((batch_size, 1, 1)))
         log_probs = []
         selected_words = None
@@ -295,7 +352,7 @@ class QuestionerGenerator(Questioner):
         for t in range(max_generation_len):
             cur_beam_size = 1 if t == 0 else beam_size
 
-            word_logits = self.get_logits(batch, state)
+            word_logits = self.module.get_logits(batch, state)
             word_logprob = F.log_softmax(word_logits, dim=1)
 
             word_logprob = word_logprob.view(batch_size, cur_beam_size, -1)
@@ -303,7 +360,7 @@ class QuestionerGenerator(Questioner):
 
             # Mask sequence if it reaches EOS
             if t > 0:
-                mask = (selected_words.view(batch_size, cur_beam_size) != self.tokenizer.sep_token).float().unsqueeze(-1)
+                mask = (selected_words.view(batch_size, cur_beam_size) != self.module.tokenizer.sep_token).float().unsqueeze(-1)
                 seq_mask = seq_mask * mask
                 word_logprob = word_logprob * seq_mask.expand_as(word_logprob)
                 old_seq_logprob = seq_logprob.expand_as(candidate_logprob).contiguous()
@@ -362,17 +419,6 @@ class QuestionerGenerator(Questioner):
         selected_logprob, selected_idx = selected_logprob[:, :beam_size], selected_idx[:, :beam_size]
         return selected_idx, selected_logprob
 
-    def expand_tensor(self, tensor, size, dim=1):
-        if size == 1 or tensor is None:
-            return tensor
-        tensor = tensor.unsqueeze(dim)
-        tensor = tensor.expand(list(tensor.shape[:dim]) + [size] + list(tensor.shape[dim + 1:])).contiguous()
-        tensor = tensor.view(list(tensor.shape[:dim - 1]) + [-1] + list(tensor.shape[dim + 1:]))
-        return tensor
-
-    def get_batch_size(self, batch):
-        return batch['imgs'].shape[0]
-
     def _adjust_tensor(self, batch_size, beam_size, tensor, selected_beam):
         if tensor is None:
             return tensor
@@ -392,6 +438,52 @@ class QuestionerGenerator(Questioner):
             selected_beam.unsqueeze(-1).expand(batch_size, beam_size, n))
             tensor = tensor.reshape(b,n)
         return tensor
+    
+    def expand_tensor(self, tensor, size, dim=1):
+        if size == 1 or tensor is None:
+            return tensor
+        tensor = tensor.unsqueeze(dim)
+        tensor = tensor.expand(list(tensor.shape[:dim]) + [size] + list(tensor.shape[dim + 1:])).contiguous()
+        tensor = tensor.view(list(tensor.shape[:dim - 1]) + [-1] + list(tensor.shape[dim + 1:]))
+        return tensor
+
+
+class TopKSampler(TextSampler):
+    
+    def __init__(self, module, k=10):
+        super().__init__(module)
+        self.k = k
+    
+    def sample(self, batch):
+        batch = self.clone_batch(batch)
+        batch = self.module.reshape_tensor(batch)
+        
+        max_generation_len = 30
+        batch_size = self.module.get_batch_size(batch)
+        sents = torch.zeros((batch_size, max_generation_len), dtype=torch.long).fill_(self.module.tokenizer.sep_token).cuda()
+
+        unfinished = ToCuda(torch.ones(batch_size, dtype=torch.bool))
+
+        state = None
+        cache = {'key':{},'value':{}}
+        for t in range(max_generation_len):
+            logits = self.module.get_logits(batch, state)
+
+            logits = logits.scatter(1, (-logits).topk(logits.shape[1] - self.k, dim=1)[1], -10000)
+            probs_t = F.softmax(logits, dim=1)
+            wt = torch.multinomial(probs_t, 1)
+
+            wt = wt.view(-1).long()
+            unfinished = unfinished * (wt != self.module.tokenizer.sep_token)
+            wt = wt * unfinished.type_as(wt) + (1 - unfinished.type_as(wt)) * self.module.tokenizer.sep_token
+            sents[:, t] = wt
+
+            state = wt.unsqueeze(1) if state is None else torch.cat((state, wt.unsqueeze(1)), dim=1)
+
+            if unfinished.sum() == 0:
+                break
+        
+        return sents
 
 
 class ModelWrapper(nn.Module):

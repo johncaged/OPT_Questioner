@@ -1,6 +1,6 @@
 from model.bert_tokenizer import BertTokenizer
 from torch.utils.data import Dataset, DataLoader
-from utils import default_config_path, parse_yaml
+from utils import default_config_path, parse_yaml, ToCuda
 from vqa_utils.vqaTools.vqa import VQA
 import os
 import random
@@ -12,6 +12,10 @@ from torch_lib.util import NOTHING
 import json
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
+from model.clip_tokenizer import tokenize
+import torch.nn as nn
+import copy
+from model.clip import CLIP
 
 
 class Tokenizer:
@@ -173,10 +177,12 @@ class QuestionCaptionProcessor(TextProcessor):
     """Get question-caption pair for question generation.
     """
     
-    def __init__(self, caption_path: str, *args, **kwargs):
+    def __init__(self, caption_path: str, text_encoder, k=0.4, *args, **kwargs):
         super().__init__(*args, **kwargs)
         with open(caption_path) as f:
             self.captions = json.load(f)
+        self.text_encoder = CLIPText(text_encoder)
+        self.k = 0.4
     
     def process(self, image_id, image_name):
         # get captions
@@ -189,25 +195,59 @@ class QuestionCaptionProcessor(TextProcessor):
         # image -> n * questions & m captions
         if self.mode == 'once':
             # random select 1 question from n questions
-            q_id = random.choice(question_ids)
-            questions, captions = self.get_multiple_pairs([q_id], img_captions)
+            img_caption = random.choice(img_captions)
+            questions, captions = self.get_multiple_pairs(list(map(lambda q_id: self.vqa.qqa[q_id]['question'], question_ids)), [img_caption])
         elif self.mode == 'all':
-            questions, captions = self.get_multiple_pairs(question_ids, img_captions)
+            questions, captions = self.get_multiple_pairs(list(map(lambda q_id: self.vqa.qqa[q_id]['question'], question_ids)), img_captions)
         return questions, captions
 
-    def get_multiple_pairs(self, q_ids, img_captions):
+    def get_multiple_pairs(self, img_questions, img_captions):
         """Get multiple question-caption pairs through an array of ids.
         """
         questions = []
         captions = []
         
         # choose one caption for every single question.
-        for q_id in q_ids:
-            caption = random.choice(img_captions)
-            question, caption = self.get_tokenized_text_pair(self.vqa.qqa[q_id]['question'], caption)
+        for img_caption in img_captions:
+            # choose through clip cosine similarity.
+            question = self.choose(img_questions, img_caption)
+            question, caption = self.get_tokenized_text_pair(question, img_caption)
             questions.append(question)
             captions.append(caption)
         return questions, captions
+    
+    def choose(self, questions, caption):
+        caption_token = tokenize(caption)
+        question_tokens = tokenize(questions)
+        
+        class TrainingMode:
+            def __init__(self, model):
+                self.model = model
+                self.training = model.training
+            
+            def __enter__(self):
+                self.model.eval()
+            
+            def __exit__(self, *args):
+                self.model.train(self.training)
+        
+        with torch.no_grad():
+            with TrainingMode(self.text_encoder):
+                caption_feature, text = self.text_encoder.encode_text(caption_token, casual=False)
+                caption_feature = caption_feature[torch.arange(caption_feature.shape[0]), torch.argmax(text, dim=-1)]
+                caption_feature = caption_feature / caption_feature.norm(dim=1, keepdim=True)
+                
+                question_features, text = self.text_encoder.encode_text(question_tokens, casual=False)
+                question_features = question_features[torch.arange(question_features.shape[0]), torch.argmax(text, dim=-1)]
+                question_features = question_features / question_features.norm(dim=1, keepdim=True)
+                
+                similarity = torch.mm(caption_feature, question_features.permute(1, 0))
+                sorted_similarity, indices = torch.sort(similarity)
+                sim_rank = indices.tolist()[0]
+                del similarity, sorted_similarity, question_features, caption_feature, text, caption_token, question_tokens
+        length = max(int(self.k * len(sim_rank)), 2)
+        question_index = random.choice(sim_rank[0:length])
+        return questions[question_index]
 
 
 class VQADataset(Dataset):
@@ -217,15 +257,13 @@ class VQADataset(Dataset):
         image_processor: ImageProcessor,
         text_processor: TextProcessor,
         image_path: str,
-        image_prefix: str,
-        auto_regressive: bool = False
+        image_prefix: str
     ):
         super().__init__()
         self.image_path = image_path
         self.image_prefix = image_prefix
         self.image_processor = image_processor
         self.text_processor = text_processor
-        self.auto_regressive = auto_regressive
 
     def __getitem__(self, index):
         # get image
@@ -245,7 +283,7 @@ class VQADataset(Dataset):
         # batch, time, channel, height, width
         imgs = img.repeat(targets.size()[0], *([1] * 4))
         # WARNING: the two targets variable are referring to the same memory address.
-        return {'imgs': imgs, 'tips': tips, 'targets': targets, 'auto_regressive': self.auto_regressive}, targets, [str(image_id)] * targets.size()[0]
+        return {'imgs': imgs, 'tips': tips, 'targets': targets}, targets, [str(image_id)] * targets.size()[0]
 
     def __len__(self):
         return self.text_processor.data_size
@@ -255,12 +293,13 @@ def build_dataset(
     dataset_type: str,
     mode: str,
     tokenizer: Tokenizer,
-    auto_regressive: bool = False,
     text_mode: str = 'once',
     confident: bool = False,
     multiple_choice_answer: bool = True,
     quesTypes: list = [],
-    ansTypes: list = []
+    ansTypes: list = [],
+    text_encoder = None,
+    k: int = 2
 ):
     img_processor_dict = {
         'train': TrainImageProcessor,
@@ -271,8 +310,8 @@ def build_dataset(
     items = config[mode]
     # text processor
     text_processor = QuestionAnswerProcessor(multiple_choice_answer, quesTypes, ansTypes, items['question'], items['annotation'], tokenizer, text_mode, confident) if dataset_type == 'answer' else \
-        QuestionCaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer, text_mode)
-    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'], auto_regressive)
+        QuestionCaptionProcessor(items['caption'], text_encoder, k, items['question'], items['annotation'], tokenizer, text_mode)
+    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'])
 
 
 class CustomDistributedSampler(DistributedSampler):
@@ -297,3 +336,26 @@ def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True):
     batch_size = batch_size // dist.get_world_size()
     sampler = CustomDistributedSampler(dataset)
     return DataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=config['num_workers'], pin_memory=config['pin_memory'])
+
+
+class CLIPText(nn.Module):
+    
+    def __init__(self, text_encoder):
+        super().__init__()
+        module_copy = lambda m: copy.deepcopy(m.cpu() if isinstance(m, nn.Module) else m.cpu().detach())
+        
+        self.token_embedding = module_copy(text_encoder.token_embedding)
+        self.positional_embedding = module_copy(text_encoder.positional_embedding)
+        self.prompt_embedding = module_copy(text_encoder.prompt_embedding)
+        self.transformer = module_copy(text_encoder.transformer)
+        self.ln_final = module_copy(text_encoder.ln_final)
+        
+        self.text_encoder = text_encoder
+        self.transformer_heads = text_encoder.transformer_heads
+    
+    @property
+    def dtype(self):
+        return self.text_encoder.dtype
+    
+    def encode_text(self, txt_tokens, casual=False):
+        return CLIP.encode_text(self, txt_tokens, casual=casual)

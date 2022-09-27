@@ -1,5 +1,5 @@
 from torch_lib import Proxy
-from model.model import Questioner
+from model.model import BaseQuestioner, QuestionerWithCaption
 import os
 from data.dataset import Tokenizer, build_dataloader, build_dataset
 from utils.loss import Loss
@@ -14,6 +14,9 @@ import argparse
 from utils.callbacks import MyCallback
 from utils.handlers import set_handler
 from torch.optim.lr_scheduler import LambdaLR
+import warnings
+ 
+warnings.filterwarnings("ignore")
 
 config = parse_yaml(default_config_path)
 set_base_path(config['base_path'])
@@ -40,7 +43,7 @@ def main():
     # tokenizer
     tokenizer = Tokenizer()
     # build and load model
-    model = Questioner(tokenizer)
+    model = BaseQuestioner(tokenizer, QuestionerWithCaption())
     model.load_pretrained_weights()
     # optimizer
     optimizer = Adam(model.parameters(), lr=3e-6)
@@ -55,10 +58,9 @@ def main():
     # model.load_state_dict(checkpoint['model'])
     # optimizer.load_state_dict(checkpoint['optimizer'])
     # del checkpoint
-    
     # build dataset
-    train_dataset = build_dataloader(build_dataset('answer', 'train', tokenizer), 48)
-    val_dataset = build_dataloader(build_dataset('answer', 'val', tokenizer), 48)
+    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 48)
+    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 48)
     # torch-lib pipeline
     proxy = Proxy(model)
     set_handler(proxy)

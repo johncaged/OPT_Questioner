@@ -1,5 +1,5 @@
-from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, TextSampler, TopKSampler, BeamSampler
-from data.dataset import Tokenizer, build_dataset
+from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, QuestionerWithCaption, TextSampler, TopKSampler, BeamSampler
+from data.dataset import Tokenizer, build_dataset, CaptionProcessor
 from torch.utils.data import DataLoader
 from utils import ToCuda
 import torch
@@ -14,45 +14,88 @@ def main():
         # tokenizer
         tokenizer = Tokenizer()
         # build and load model
-        model = BaseQuestioner(tokenizer, QuestionerWithAnswer(), auto_regressive=True)
+        model = BaseQuestioner(tokenizer, QuestionerWithCaption(), auto_regressive=True)
+        # model = BaseQuestioner(tokenizer, QuestionerWithAnswer(), auto_regressive=True)
         model = ModelWrapper(model)
-        checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
+        # checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
+        checkpoint = torch.load('./log/test/checkpoint/checkpoint_12.pth', map_location='cpu')
         model.load_state_dict(checkpoint['model'])
         model.eval()
         del checkpoint
-        model: TextSampler = ToCuda(TopKSampler(model.module))
+        model: TextSampler = ToCuda(TopKSampler(model.module, end_token=tokenizer.question_answer_sep_token))
+        answer_model: TextSampler = ToCuda(TopKSampler(model.module, k=1))
+        # answer_model: TextSampler = ToCuda(BeamSampler(model.module))
+        val_dataset = DataLoader(build_dataset('caption_only', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
         # val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
-        val_dataset = DataLoader(build_dataset('caption', 'val', tokenizer, 'all', text_encoder=model.module.clip), batch_size=1, shuffle=True)
+        # val_dataset = DataLoader(build_dataset('caption', 'val', tokenizer, 'all', text_encoder=model.module.clip), batch_size=1, shuffle=True)
         
-        max_iter = 1
-        repeat_sample = 10
+        detach = lambda x: x.detach().cpu().tolist()
+        
+        max_iter = 10
+        
+        types = [
+            *[{'answer_type': 'yes/no', 'similar': True} for _ in range(3)],
+            *[{'answer_type': 'yes/no', 'similar': False} for _ in range(3)],
+            *[{'answer_type': 'number', 'similar': True} for _ in range(3)],
+            *[{'answer_type': 'number', 'similar': False} for _ in range(3)],
+            *[{'answer_type': 'other', 'similar': True} for _ in range(3)],
+            *[{'answer_type': 'other', 'similar': False} for _ in range(3)]
+        ]
+        
+        repeat_sample = len(types)
         for i, batch in enumerate(val_dataset):
             tip = torch.flatten(batch[0]['tips'], start_dim=0, end_dim=1)
+            
             target = torch.flatten(batch[1], start_dim=0, end_dim=1)
             
             img = []
             for item in zip(*batch[2]):
                 img.extend(list(item))
             if img[0] in all_images['images']:
+            # if img[0] not in all_images['images']:
                 max_iter += 1
                 continue
             
-            for _ in range(repeat_sample):
-                prediction = model(batch[0])
+            append_to_file('result.txt', 'Choose Image: {0}\n\n'.format(img[0]))
             
-                detach = lambda x: x.detach().cpu().tolist()
+            for j in range(repeat_sample):
+                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, types[j]['answer_type'], types[j]['similar'], tokenizer)
+                
+                append_to_file('result.txt', 'Answer Type: {0}, Similar: {1}\n'.format(types[j]['answer_type'], types[j]['similar']))
+                
+                question_prediction = model(batch[0])
+                
+                _question_prediction = detach(question_prediction)
+                _question_prediction = [item[0:item.index(tokenizer.question_answer_sep_token) + 1] for item in _question_prediction]
+                max_length = max(map(lambda item: len(item), _question_prediction))
+                _question_prediction = [([0] * (max_length - len(item))) + item for item in _question_prediction]
+                
+                # batch[0]['tips'] = torch.cat([
+                #     batch[0]['tips'],
+                #     torch.tensor(_question_prediction).long()
+                    # torch.where(question_prediction != tokenizer.question_answer_sep_token, question_prediction, 0),
+                    # ToCuda(torch.tensor([tokenizer.question_answer_sep_token]).unsqueeze(0).expand(question_prediction.shape[0], -1).long())
+                # ], dim=1)
+                
+                batch[0]['questions'] = ToCuda(torch.tensor(_question_prediction).long())
+                
+                # print(convert_items(detach(batch[0]['tips']), tokenizer, tokenizer.question_answer_sep_token))
+                
+                answer_prediction = answer_model(batch[0])
+                
+                del batch[0]['questions']
 
-                for answer, question, output, image in zip(convert_items(detach(tip), tokenizer),
-                                                        convert_items(detach(target), tokenizer),
-                                                        convert_items(detach(prediction), tokenizer),
-                                                        img):
-                    append_to_file('result.txt', ('Image: {0} - Answer: {1} - Question: {2} - Output: {3}\n'.format(
-                        image,
-                        answer,
+                for caption, answer, question, image in zip(convert_items(detach(tip), tokenizer),
+                                                            convert_items(detach(answer_prediction), tokenizer, start_token=tokenizer.question_answer_sep_token),
+                                                            convert_items(detach(question_prediction), tokenizer, end_token=tokenizer.question_answer_sep_token),
+                                                            # convert_items(detach(question_prediction), tokenizer),
+                                                            img):
+                    append_to_file('result.txt', ('Caption: {0} - Question: {1} - Answer: {2}\n'.format(
+                        caption,
                         question,
-                        output
+                        answer
                     )))
-                append_to_file('result.txt', 'sample-----------\n')
+                append_to_file('result.txt', '\n')
 
             items = map(lambda x: int(x), list(set(img)))
             all_images['images'].extend(items)
@@ -69,10 +112,16 @@ def append_to_file(path, content):
         f.write(content)
 
 
-def convert_items(items, tokenizer: Tokenizer):
+def convert_items(items, tokenizer: Tokenizer, end_token=102, start_token=101):
+    def find(_list, item):
+        try:
+            return _list.index(item)
+        except Exception:
+            return -1
+    
     results = []
     for item in items:
-        results.append(' '.join(tokenizer.tokenizer.convert_ids_to_tokens(item[(0 if item[0] != 101 else 1):item.index(102)])))
+        results.append(' '.join(tokenizer.tokenizer.convert_ids_to_tokens(item[find(item, start_token) + 1:find(item, end_token)])).replace(' ##', ''))
     return results
 
 

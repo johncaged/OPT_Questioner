@@ -12,5 +12,16 @@ def main(img_id, i):
 
 
 if __name__ == '__main__':
-    for i, img_id in enumerate([75563]):
+    for i, img_id in enumerate([
+        142667,
+        417455,
+        143224,
+        389974,
+        37389,
+        391392,
+        339120,
+        391688,
+        398203,
+        360182
+    ]):
         main(img_id, i)

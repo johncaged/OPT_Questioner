@@ -15,7 +15,7 @@ from utils.callbacks import MyCallback
 from utils.handlers import set_handler
 from torch.optim.lr_scheduler import LambdaLR
 import warnings
- 
+
 warnings.filterwarnings("ignore")
 
 config = parse_yaml(default_config_path)
@@ -46,7 +46,7 @@ def main():
     model = BaseQuestioner(tokenizer, QuestionerWithCaption())
     model.load_pretrained_weights()
     # optimizer
-    optimizer = Adam(model.parameters(), lr=3e-6)
+    optimizer = Adam(model.parameters(), lr=2e-6)
     
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()
@@ -59,8 +59,8 @@ def main():
     # optimizer.load_state_dict(checkpoint['optimizer'])
     # del checkpoint
     # build dataset
-    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 48)
-    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 48)
+    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 63)
+    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 63)
     # torch-lib pipeline
     proxy = Proxy(model)
     set_handler(proxy)

@@ -142,7 +142,7 @@ class BaseQuestioner(QuestionerModule):
         **kwargs
     ):
         super().__init__(*args, **kwargs)
-        self.masker = TokenMasker(mask_token=tokenizer.mask_token, range_start=106, range_end=30522)
+        self.masker = TokenMasker(mask_token=tokenizer.mask_token, range_start=106, range_end=30522, question_answer_sep_token=tokenizer.question_answer_sep_token)
         self.tokenizer = tokenizer
         self.questioner_adapter = questioner_adapter
         self.auto_regressive = auto_regressive
@@ -157,8 +157,10 @@ class BaseQuestioner(QuestionerModule):
         return batch
     
     def get_task_prompt(self, content, batch_size):
+        torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
+        
         prompt = self.tokenizer.tokenize_without_padding(content)
-        return ToCuda(torch.tensor(prompt).unsqueeze(0).expand(batch_size, -1).long())
+        return ToCuda(torch.cat([torch_convert(prompt), torch_convert([self.tokenizer.task_prompt_sep_token])], dim=1))
     
     def forward_video(self, video):
         b, n, _, h, w = video.shape
@@ -268,10 +270,11 @@ class PredictionHead(nn.Module):
 
 class TokenMasker(nn.Module):
 
-    def __init__(self, mask_token = -1, range_start=-1, range_end=-1):
+    def __init__(self, mask_token = -1, range_start=-1, range_end=-1, question_answer_sep_token=-1):
         super().__init__()
         self.mask_token = mask_token
         self.range = [range_start, range_end]
+        self.question_answer_sep_token = question_answer_sep_token
 
     def forward(self, tokens, mask_prob):
         tokens = tokens.clone()
@@ -284,9 +287,13 @@ class TokenMasker(nn.Module):
         # generate indicator first:
         mask_indicator = np.zeros(tokens.shape, dtype=np.int64)
         for i in range(len(mask_indicator)):
+            answer_part = False
             while all(mask_indicator[i] == 0):
                 for j in range(1, len(mask_indicator[0])):
-                    if tokens[i][j]!=0 and random.random() < mask_prob:
+                    if tokens[i][j] == self.question_answer_sep_token:
+                        answer_part = True
+                    # mask all answers.
+                    if tokens[i][j] != 0 and (random.random() < mask_prob or answer_part):
                         mask_indicator[i][j] = 1
 
         labels = -np.ones(tokens.shape, dtype=np.int64)
@@ -310,9 +317,10 @@ class TokenMasker(nn.Module):
 
 class TextSampler(nn.Module):
     
-    def __init__(self, module: BaseQuestioner):
+    def __init__(self, module: BaseQuestioner, end_token=None):
         super().__init__()
         self.module: BaseQuestioner = module
+        self.end_token = end_token if end_token is not None else self.module.tokenizer.sep_token
     
     def sample(self, batch):
         pass
@@ -329,8 +337,8 @@ class TextSampler(nn.Module):
 
 class BeamSampler(TextSampler):
     
-    def __init__(self, module, beam_size=3):
-        super().__init__(module)
+    def __init__(self, module, beam_size=3, end_token=None):
+        super().__init__(module, end_token)
         self.beam_size = beam_size
     
     def sample(self, batch):
@@ -360,7 +368,7 @@ class BeamSampler(TextSampler):
 
             # Mask sequence if it reaches EOS
             if t > 0:
-                mask = (selected_words.view(batch_size, cur_beam_size) != self.module.tokenizer.sep_token).float().unsqueeze(-1)
+                mask = (selected_words.view(batch_size, cur_beam_size) != self.end_token).float().unsqueeze(-1)
                 seq_mask = seq_mask * mask
                 word_logprob = word_logprob * seq_mask.expand_as(word_logprob)
                 old_seq_logprob = seq_logprob.expand_as(candidate_logprob).contiguous()
@@ -450,8 +458,8 @@ class BeamSampler(TextSampler):
 
 class TopKSampler(TextSampler):
     
-    def __init__(self, module, k=10):
-        super().__init__(module)
+    def __init__(self, module, k=10, end_token=None):
+        super().__init__(module, end_token)
         self.k = k
     
     def sample(self, batch):
@@ -460,11 +468,11 @@ class TopKSampler(TextSampler):
         
         max_generation_len = 30
         batch_size = self.module.get_batch_size(batch)
-        sents = torch.zeros((batch_size, max_generation_len), dtype=torch.long).fill_(self.module.tokenizer.sep_token).cuda()
+        sents = ToCuda(torch.zeros((batch_size, max_generation_len), dtype=torch.long).fill_(self.end_token))
 
         unfinished = ToCuda(torch.ones(batch_size, dtype=torch.bool))
 
-        state = None
+        state = None if 'questions' not in batch else batch['questions']
         cache = {'key':{},'value':{}}
         for t in range(max_generation_len):
             logits = self.module.get_logits(batch, state)
@@ -474,8 +482,8 @@ class TopKSampler(TextSampler):
             wt = torch.multinomial(probs_t, 1)
 
             wt = wt.view(-1).long()
-            unfinished = unfinished * (wt != self.module.tokenizer.sep_token)
-            wt = wt * unfinished.type_as(wt) + (1 - unfinished.type_as(wt)) * self.module.tokenizer.sep_token
+            unfinished = unfinished * (wt != self.end_token)
+            wt = wt * unfinished.type_as(wt) + (1 - unfinished.type_as(wt)) * self.end_token
             sents[:, t] = wt
 
             state = wt.unsqueeze(1) if state is None else torch.cat((state, wt.unsqueeze(1)), dim=1)

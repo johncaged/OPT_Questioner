@@ -2,11 +2,12 @@ from torch_lib import Proxy
 from model.model import BaseQuestioner, QuestionerWithCaption
 import os
 from data.dataset import Tokenizer, build_dataloader, build_dataset
-from utils.loss import Loss
+from utils.loss import Loss, MixLoss
 from utils import parse_yaml, default_config_path
 from torch.optim import Adam
 import torch.distributed as dist
 from apex.parallel import DistributedDataParallel as DDP
+# from torch.nn.parallel import DistributedDataParallel as DDP
 import torch
 from apex import amp
 from torch_lib.log.directory import set_base_path, set_namespace
@@ -46,7 +47,7 @@ def main():
     model = BaseQuestioner(tokenizer, QuestionerWithCaption())
     model.load_pretrained_weights()
     # optimizer
-    optimizer = Adam(model.parameters(), lr=2e-6)
+    optimizer = Adam(model.parameters(), lr=3e-6)
     
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()
@@ -59,15 +60,15 @@ def main():
     # optimizer.load_state_dict(checkpoint['optimizer'])
     # del checkpoint
     # build dataset
-    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 63)
-    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 63)
+    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 98)
+    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 98)
     # torch-lib pipeline
     proxy = Proxy(model)
     set_handler(proxy)
     proxy.count_params('M')
     total_epoch = 20
     proxy.build(
-        loss=Loss(),
+        loss=Loss(label_smoothing=0.0),
         optimizer=optimizer,
         lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: (1 - epoch / total_epoch) ** 0.9)
     )

@@ -146,6 +146,7 @@ class BaseQuestioner(QuestionerModule):
         self.tokenizer = tokenizer
         self.questioner_adapter = questioner_adapter
         self.auto_regressive = auto_regressive
+        self._forward_answer = False
     
     def reshape_tensor(self, batch):
         if 'imgs' in batch and len(batch['imgs'].size()) > 5:
@@ -183,25 +184,27 @@ class BaseQuestioner(QuestionerModule):
         img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips']), ToCuda(batch['targets'])
 
         if self.auto_regressive is False:
-            # random mask to the target(also called 'question')
-            target, labels = self.masker(target, 0.6)
-
-        output_txt = self.video_language_process(img, tip, target)
-
-        if self.auto_regressive is False:
+            # random mask the target.
+            target, labels = self.masker(target, 0.6, answer_mask=self._forward_answer)
+            output_txt = self.video_language_process(img, tip, target)
             output_txt = output_txt[labels != -1]
+            prediction_scores = self.cls_head(output_txt)
+            del output_txt, img, tip, target
+            return prediction_scores, labels[labels != -1]
+            
         else:
+            output_txt = self.video_language_process(img, tip, target)
             output_txt = output_txt[:, -1]
-
-        prediction_scores = self.cls_head(output_txt)
-        return prediction_scores, (labels[labels != -1] if self.auto_regressive is False else None)
+            prediction_scores = self.cls_head(output_txt)
+            del output_txt, img, tip, target
+            return prediction_scores, None
 
     def video_language_process(self, img, tip, target):
         # get encoded and embedded img features
         video_input = self.forward_video(img)
         video_input = self.get_video_multimodal_embedding(video_input)
         # get task prompt
-        batch_size = target.shape[0]
+        batch_size = tip.shape[0]
         task_prompt = self.get_task_prompt(self.questioner_adapter.get_task(), batch_size)
         task_prompt = torch.cat((tip[:, 0:1], task_prompt, tip[:, 1:]), dim=1)
         # forward multimodal
@@ -268,7 +271,7 @@ class PredictionHead(nn.Module):
             self.decoder.weight = weight
 
 
-class TokenMasker(nn.Module):
+class TokenMasker:
 
     def __init__(self, mask_token = -1, range_start=-1, range_end=-1, question_answer_sep_token=-1):
         super().__init__()
@@ -276,24 +279,27 @@ class TokenMasker(nn.Module):
         self.range = [range_start, range_end]
         self.question_answer_sep_token = question_answer_sep_token
 
-    def forward(self, tokens, mask_prob):
-        tokens = tokens.clone()
-        tokens, labels = self.perform_mask(tokens, mask_prob)
+    def __call__(self, tokens, mask_prob, answer_mask: bool = False):
+        tokens, labels = self.perform_mask(tokens, mask_prob, answer_mask=answer_mask)
         return tokens, labels
 
-    def perform_mask(self, tokens, mask_prob):
-        tokens = np.array(tokens.cpu().numpy())
-
+    def perform_mask(self, tokens, mask_prob, answer_mask: bool = False):
+        tokens = np.array(tokens.clone().detach().cpu().numpy())
+        
         # generate indicator first:
         mask_indicator = np.zeros(tokens.shape, dtype=np.int64)
         for i in range(len(mask_indicator)):
-            answer_part = False
             while all(mask_indicator[i] == 0):
+                answer_part = False
                 for j in range(1, len(mask_indicator[0])):
-                    if tokens[i][j] == self.question_answer_sep_token:
+                    if tokens[i][j - 1] == self.question_answer_sep_token:
                         answer_part = True
-                    # mask all answers.
-                    if tokens[i][j] != 0 and (random.random() < mask_prob or answer_part):
+                    
+                    # mask all answer tokens.
+                    _mask_answer_condition = answer_mask is True and answer_part is True
+                    # random mask question tokens.
+                    _mask_question_condition = answer_mask is False and answer_part is False and random.random() < mask_prob
+                    if tokens[i][j] != 0 and (_mask_answer_condition or _mask_question_condition):
                         mask_indicator[i][j] = 1
 
         labels = -np.ones(tokens.shape, dtype=np.int64)
@@ -492,6 +498,16 @@ class TopKSampler(TextSampler):
                 break
         
         return sents
+
+
+class TwoStageTopKSampler(TextSampler):
+    
+    def __init__(self, module, base_k=5, end_token=None):
+        super().__init__(module, end_token)
+        self.base_k = base_k
+    
+    def sample(self, batch):
+        pass
 
 
 class ModelWrapper(nn.Module):

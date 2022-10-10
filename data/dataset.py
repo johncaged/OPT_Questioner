@@ -315,7 +315,7 @@ class CaptionProcessor(TextProcessor):
             similar_token,
             torch_convert([tokenizer.task_prompt_sep_token]),
             caption[:, 1:]
-        ],dim=1)
+        ], dim=1)
 
 
 class VQADataset(Dataset):

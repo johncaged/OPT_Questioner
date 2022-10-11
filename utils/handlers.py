@@ -50,3 +50,10 @@ def set_handler(proxy):
         proxy.handler.Loss()
     ]))
     proxy.run.train[1][4].insert(6, CoverLossHandler())
+    proxy.run.train[1][9].insert(0, HandlerContainer([
+        SetModelHandler(False),
+        proxy.handler.Forward(),
+        proxy.handler.Loss(),
+        SetModelHandler(True)
+    ]))
+    proxy.run.train[1][9].insert(3, CoverLossHandler())

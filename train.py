@@ -60,8 +60,8 @@ def main():
     # optimizer.load_state_dict(checkpoint['optimizer'])
     # del checkpoint
     # build dataset
-    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 98)
-    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 98)
+    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 119)
+    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 119)
     # torch-lib pipeline
     proxy = Proxy(model)
     set_handler(proxy)

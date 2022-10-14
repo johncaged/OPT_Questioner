@@ -1,29 +1,24 @@
 from vqa_utils.vqaTools.vqa import VQA
 from utils import parse_yaml, default_config_path
+from data.dataset import CC3MDataset, Tokenizer, build_cc3m_dataset, CaptionProcessor
+from torch.utils.data import DataLoader
+import torch
 
 
 def main():
-    config = parse_yaml(default_config_path)
-
-    question_type = set()
-    answer_type = set()
+    print((torch.ones(1) / torch.zeros(1)).tolist())
+    a = torch.tensor([1.0])
+    print(a, torch.zeros(1).size())
+    # dataset = build_cc3m_dataset(Tokenizer())
+    # dataset = DataLoader(dataset, shuffle=True, batch_size=64, collate_fn=CC3MDataset.collate_fn)
     
-    def count(annotation, question):
-        vqa = VQA(annotation, question)
-        ids = list(set(vqa.getImgIds()))
-        for _id in ids:
-            q_ids = vqa.getQuesIds(_id, ansTypes=['number', 'other'])
-            for q_id in q_ids:
-                item = vqa.loadQA(q_id)[0]
-                question_type.add(item['question_type'])
-                answer_type.add(item['answer_type'])
-
-    count(config['train']['annotation'], config['train']['question'])
-    count(config['val']['annotation'], config['val']['question'])
-    
-    print(question_type)
-    print(answer_type)
-
+    # # TODO: IndexParser
+    # # TODO: proxy.predict
+    # # TODO: callback
+    # for i in dataset:
+    #     print(i['imgs'].size())
+    #     print(i['tips'].size())
+    #     return
 
 if __name__ == '__main__':
     main()

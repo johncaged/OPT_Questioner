@@ -1,6 +1,9 @@
 from torch_lib.core.handler import BackwardHandler, HandlerContainer, LossHandler
 from torch_lib.core.handler import Handler
 from apex import amp
+import torch.distributed as dist
+import torch
+from utils import ToCuda
 
 
 class AMPBackward(BackwardHandler):
@@ -25,6 +28,11 @@ class CoverLossHandler(Handler):
     
     def handle(self, ctx):
         ctx.step.loss = ctx.custom.loss
+        
+        tensor_list = [ToCuda(torch.zeros(1)) for _ in range(dist.get_world_size())]
+        dist.all_gather(tensor_list, ToCuda(torch.tensor([ctx.custom.loss])))
+        
+        ctx.step.loss = float(torch.cat(tensor_list, dim=0).mean().clone().cpu().detach())
         ctx.custom.loss = -1
 
 

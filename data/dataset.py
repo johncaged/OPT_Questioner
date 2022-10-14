@@ -16,6 +16,7 @@ from model.clip_tokenizer import tokenize
 import torch.nn as nn
 import copy
 from model.clip import CLIP
+import collections
 
 
 class Tokenizer:
@@ -60,11 +61,13 @@ class Tokenizer:
 
 class ImageProcessor:
     
-    def __init__(self):
+    def __init__(self, config_path=default_config_path):
         super().__init__()
         self.mean = [0.48145466, 0.4578275, 0.40821073] 
         self.std  = [0.26862954, 0.26130258, 0.27577711]
-        self.resolution = 480
+        
+        config = parse_yaml(config_path)
+        self.resolution = config['video_resolution']
         self.transforms = NOTHING
     
     def process(self, img):
@@ -185,9 +188,9 @@ class QuestionCaptionProcessor(TextProcessor):
         super().__init__(*args, **kwargs)
         with open(caption_path) as f:
             self.captions = json.load(f)
-        self.text_encoder = CLIPText(text_encoder)
-        self.k = k
-        self.probability = 0.5
+        # self.text_encoder = CLIPText(text_encoder)
+        # self.k = k
+        # self.probability = 0.5
     
     def process(self, image_id, image_name):
         # get captions
@@ -214,21 +217,25 @@ class QuestionCaptionProcessor(TextProcessor):
         # answer_type + [unused0] + similar + [unused0] + caption
         tips = []
         
-        img_questions = list(map(lambda q_id: self.vqa.qqa[q_id]['question'], img_question_ids))
+        # img_questions = list(map(lambda q_id: self.vqa.qqa[q_id]['question'], img_question_ids))
         
         # choose one caption for every single question.
         for img_caption in img_captions:
             # choose through clip cosine similarity.
-            question, question_index, similar = self.choose(img_questions, img_caption)
-            q_id = img_question_ids[question_index]
+            # question, question_index, similar = self.choose(img_questions, img_caption)
+            
+            # q_id = img_question_ids[question_index]
+            q_id = random.choice(img_question_ids)
+            question = self.vqa.qqa[q_id]['question']
             item = self.vqa.loadQA(q_id)[0]
             answer = item['multiple_choice_answer']
             answer_type = item['answer_type']
-            similar_token = 'similar' if similar else 'different'
+            # similar_token = 'similar' if similar else 'different'
             
-            tip = self.concat_tokens([answer_type, similar_token, img_caption], self.tokenizer.task_prompt_sep_token)
-            # max_len + 6 because the concatenation of answer type and similar token.
-            tip = self.tokenizer.get_padded_tokens(tip, max_len=self.tokenizer.max_len + 6).unsqueeze(0)
+            # tip = self.concat_tokens([answer_type, similar_token, img_caption], self.tokenizer.task_prompt_sep_token)
+            tip = self.concat_tokens([answer_type, img_caption], self.tokenizer.task_prompt_sep_token)
+            # max_len + 4 because of the concatenation of answer type prompt.
+            tip = self.tokenizer.get_padded_tokens(tip, max_len=self.tokenizer.max_len + 4).unsqueeze(0)
             target = self.concat_tokens([question, answer], self.tokenizer.question_answer_sep_token)
             target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
             targets.append(target)
@@ -244,78 +251,40 @@ class QuestionCaptionProcessor(TextProcessor):
         result.pop(-1)
         return result
     
-    def choose(self, questions, caption):
-        caption_token = tokenize(caption)
-        question_tokens = tokenize(questions)
-        # whether to choose the most similar question to the caption or not.
-        similar = random.random() < self.probability
+    # def choose(self, questions, caption):
+    #     caption_token = tokenize(caption)
+    #     question_tokens = tokenize(questions)
+    #     # whether to choose the most similar question to the caption or not.
+    #     similar = random.random() < self.probability
         
-        class TrainingMode:
-            def __init__(self, model):
-                self.model = model
-                self.training = model.training
+    #     class TrainingMode:
+    #         def __init__(self, model):
+    #             self.model = model
+    #             self.training = model.training
             
-            def __enter__(self):
-                self.model.eval()
+    #         def __enter__(self):
+    #             self.model.eval()
             
-            def __exit__(self, *args):
-                self.model.train(self.training)
+    #         def __exit__(self, *args):
+    #             self.model.train(self.training)
         
-        with torch.no_grad():
-            with TrainingMode(self.text_encoder):
-                caption_feature, text = self.text_encoder.encode_text(caption_token, casual=False)
-                caption_feature = caption_feature[torch.arange(caption_feature.shape[0]), torch.argmax(text, dim=-1)]
-                caption_feature = caption_feature / caption_feature.norm(dim=1, keepdim=True)
+    #     with torch.no_grad():
+    #         with TrainingMode(self.text_encoder):
+    #             caption_feature, text = self.text_encoder.encode_text(caption_token, casual=False)
+    #             caption_feature = caption_feature[torch.arange(caption_feature.shape[0]), torch.argmax(text, dim=-1)]
+    #             caption_feature = caption_feature / caption_feature.norm(dim=1, keepdim=True)
                 
-                question_features, text = self.text_encoder.encode_text(question_tokens, casual=False)
-                question_features = question_features[torch.arange(question_features.shape[0]), torch.argmax(text, dim=-1)]
-                question_features = question_features / question_features.norm(dim=1, keepdim=True)
+    #             question_features, text = self.text_encoder.encode_text(question_tokens, casual=False)
+    #             question_features = question_features[torch.arange(question_features.shape[0]), torch.argmax(text, dim=-1)]
+    #             question_features = question_features / question_features.norm(dim=1, keepdim=True)
                 
-                similarity = torch.mm(caption_feature, question_features.permute(1, 0))
-                sorted_similarity, indices = torch.sort(similarity, descending=similar)
-                sim_rank = indices.tolist()[0]
-                del similarity, sorted_similarity, question_features, caption_feature, text, caption_token, question_tokens
-        length = min(max(int(((1 - self.k) if similar else self.k) * len(sim_rank)), 2), len(sim_rank))
-        question_index = random.choice(sim_rank[0:length])
-        return questions[question_index], question_index, similar
-
-
-class CaptionProcessor(TextProcessor):
-    
-    def __init__(self, caption_path: str, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        with open(caption_path) as f:
-            self.captions = json.load(f)
-    
-    def process(self, image_id, image_name):
-        # get captions
-        img_captions = self.captions[image_name]
-        
-        parse_text = lambda item: self.tokenizer.tokenize(item).unsqueeze(0)
-        
-        if self.mode == 'once':
-            caption = random.choice(img_captions)
-            return parse_text(caption), parse_text(caption)
-        elif self.mode == 'all':
-            img_captions = [parse_text(caption) for caption in img_captions]
-            return img_captions, img_captions
-
-    @staticmethod
-    def attach_task_prompt(caption, answer_type, similar: bool, tokenizer: Tokenizer):
-        assert answer_type in ['yes/no', 'number', 'other']
-        batch_size = caption.shape[0]
-        torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
-        
-        answer_token = torch_convert(tokenizer.tokenize_without_padding(answer_type))
-        similar_token = torch_convert(tokenizer.tokenize_without_padding('similar' if similar else 'different'))
-        return torch.cat([
-            caption[:, 0:1],
-            answer_token,
-            torch_convert([tokenizer.task_prompt_sep_token]),
-            similar_token,
-            torch_convert([tokenizer.task_prompt_sep_token]),
-            caption[:, 1:]
-        ], dim=1)
+    #             similarity = torch.mm(caption_feature, question_features.permute(1, 0))
+    #             sorted_similarity, indices = torch.sort(similarity, descending=similar)
+    #             sim_rank = indices.tolist()[0]
+    #             del similarity, sorted_similarity, question_features, caption_feature, text, caption_token, question_tokens
+    #     length = min(max(int(((1 - self.k) if similar else self.k) * len(sim_rank)), 2), len(sim_rank))
+    #     question_index = random.choice(sim_rank[0:length])
+    #     return questions[question_index], question_index, similar
 
 
 class VQADataset(Dataset):
@@ -379,7 +348,7 @@ def build_dataset(
     # text processor
     text_processor = QuestionAnswerProcessor(multiple_choice_answer, quesTypes, ansTypes, items['question'], items['annotation'], tokenizer, text_mode, confident) if dataset_type == 'answer' else \
         QuestionCaptionProcessor(items['caption'], text_encoder, k, items['question'], items['annotation'], tokenizer, text_mode) if dataset_type == 'caption' else \
-        CaptionProcessor(items['caption'], items['question'], items['annotation'], tokenizer, text_mode)
+        None
     return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'])
 
 
@@ -398,13 +367,6 @@ class CustomDistributedSampler(DistributedSampler):
             indices = indices[:self.total_size]
         indices = indices[self.rank:len(indices):self.num_replicas]
         return iter(indices)
-
-
-def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True):
-    config = parse_yaml(default_config_path)
-    batch_size = batch_size // dist.get_world_size()
-    sampler = CustomDistributedSampler(dataset)
-    return DataLoader(dataset, sampler=sampler, batch_size=batch_size, num_workers=config['num_workers'], pin_memory=config['pin_memory'])
 
 
 class CLIPText(nn.Module):
@@ -428,3 +390,124 @@ class CLIPText(nn.Module):
     
     def encode_text(self, txt_tokens, casual=False):
         return CLIP.encode_text(self, txt_tokens, casual=casual)
+
+
+class CaptionProcessor:
+    
+    def __init__(self, caption_path: str, tokenizer: Tokenizer, mode: str = 'once'):
+        super().__init__()
+        with open(caption_path) as f:
+            self.captions = json.load(f)
+        self.tokenizer = tokenizer
+        self.mode = mode
+    
+    def process(self, image_id):
+        # get captions
+        img_captions = self.captions[image_id]
+        img_captions = img_captions if isinstance(img_captions, (list, tuple)) else [img_captions]
+        
+        parse_text = lambda item: self.tokenizer.tokenize(item).unsqueeze(0)
+        
+        if self.mode == 'once':
+            caption = random.choice(img_captions)
+            return [parse_text(caption)]
+        elif self.mode == 'all':
+            img_captions = [parse_text(caption) for caption in img_captions]
+            return img_captions
+
+    @staticmethod
+    def attach_task_prompt(caption, answer_type, similar: bool, tokenizer: Tokenizer):
+        assert answer_type in ['yes/no', 'number', 'other']
+        batch_size = caption.shape[0]
+        torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
+        
+        answer_type_token = torch_convert(tokenizer.tokenize_without_padding(answer_type))
+        # similar_token = torch_convert(tokenizer.tokenize_without_padding('similar' if similar else 'different'))
+        return torch.cat([
+            caption[:, 0:1],
+            answer_type_token,
+            torch_convert([tokenizer.task_prompt_sep_token]),
+            # similar_token,
+            # torch_convert([tokenizer.task_prompt_sep_token]),
+            caption[:, 1:]
+        ], dim=1)
+
+
+class CC3MDataset(Dataset):
+    
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        image_processor: ImageProcessor,
+        text_processor: CaptionProcessor,
+        config_path=default_config_path
+    ):
+        config = parse_yaml(config_path)
+        self.img_names = []
+        with open(config['cc3m']['train_meta_path']) as f:
+            self.img_names = list(map(lambda item: item.strip().replace('\n', '').replace('\r', ''), f.readlines()))
+        
+        self.img_path = config['cc3m']['img_path']
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
+        self.text_processor = text_processor
+    
+    def __getitem__(self, index):
+        img_name = self.img_names[index]
+        
+        img_path = os.path.join(self.img_path, img_name)
+        img = Image.open(img_path)
+        img = self.image_processor.process(img).unsqueeze(0)
+        
+        img_id = os.path.splitext(os.path.split(img_name)[1])[0]
+        captions = self.text_processor.process(img_id)
+        captions = torch.cat(captions, dim=0)
+        
+        # batch, time, channel, height, width
+        imgs = img.repeat(captions.size()[0], *([1] * 4))
+        return {'imgs': imgs, 'tips': captions}, str(img_id)
+    
+    def __len__(self):
+        return len(self.img_names)
+
+    @staticmethod
+    def collate_fn(batch):
+        imgs = list(map(lambda item: item[0]['imgs'], batch))
+        tips = list(map(lambda item: item[0]['tips'], batch))
+        
+        img_ids = []
+        for item in zip(batch, tips):
+            img_ids.extend([item[0][1]] * item[1].size()[0])
+        
+        return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0)}, img_ids
+
+
+def build_cc3m_dataset(
+    tokenizer: Tokenizer,
+    config_path=default_config_path,
+    text_mode: str = 'once'
+):
+    config = parse_yaml(config_path)
+    image_processor = ValImageProcessor()
+    text_processor = CaptionProcessor(config['cc3m']['txt_mapper_path'], tokenizer, text_mode)
+    return CC3MDataset(tokenizer, image_processor, text_processor, config_path)
+
+
+def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True, collate_fn=None):
+    config = parse_yaml(default_config_path)
+    batch_size = batch_size // dist.get_world_size()
+    sampler = CustomDistributedSampler(dataset)
+    return DataLoader(dataset, sampler=sampler, batch_size=batch_size, collate_fn=collate_fn, num_workers=config['num_workers'], pin_memory=config['pin_memory'])
+
+
+def reshape_tensor(batch):
+    items = [
+        {'item': 'imgs', 'length': 5},
+        {'item': 'tips', 'length': 2},
+        {'item': 'targets', 'length': 2}
+    ]
+    
+    for item in items:
+        if item['item'] in batch and len(batch[item['item']].size()) > item['length']:
+            batch[item['item']] = torch.flatten(batch[item['item']], start_dim=0, end_dim=1)
+    return batch

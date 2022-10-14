@@ -6,7 +6,7 @@ from .bert import BertModel, BertConfig
 from apex.normalization.fused_layer_norm import FusedLayerNorm
 import os
 from utils import default_config_path, parse_yaml
-from data.dataset import Tokenizer
+from data.dataset import Tokenizer, reshape_tensor
 import copy
 import numpy as np
 import random
@@ -148,15 +148,6 @@ class BaseQuestioner(QuestionerModule):
         self.auto_regressive = auto_regressive
         self._forward_answer = False
     
-    def reshape_tensor(self, batch):
-        if 'imgs' in batch and len(batch['imgs'].size()) > 5:
-            batch['imgs'] = torch.flatten(batch['imgs'], start_dim=0, end_dim=1)
-        if 'tips' in batch and len(batch['tips'].size()) > 2:
-            batch['tips'] = torch.flatten(batch['tips'], start_dim=0, end_dim=1)
-        if 'targets' in batch and len(batch['targets'].size()) > 2:
-            batch['targets'] = torch.flatten(batch['targets'], start_dim=0, end_dim=1)
-        return batch
-    
     def get_task_prompt(self, content, batch_size):
         torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
         
@@ -180,7 +171,7 @@ class BaseQuestioner(QuestionerModule):
         return video
 
     def forward(self, batch):
-        batch = self.reshape_tensor(batch)
+        batch = reshape_tensor(batch)
         img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips']), ToCuda(batch['targets'])
 
         if self.auto_regressive is False:
@@ -349,7 +340,7 @@ class BeamSampler(TextSampler):
     
     def sample(self, batch):
         batch = self.clone_batch(batch)
-        batch = self.module.reshape_tensor(batch)
+        batch = reshape_tensor(batch)
         
         max_generation_len = 30
 
@@ -470,7 +461,7 @@ class TopKSampler(TextSampler):
     
     def sample(self, batch):
         batch = self.clone_batch(batch)
-        batch = self.module.reshape_tensor(batch)
+        batch = reshape_tensor(batch)
         
         max_generation_len = 30
         batch_size = self.module.get_batch_size(batch)
@@ -479,7 +470,6 @@ class TopKSampler(TextSampler):
         unfinished = ToCuda(torch.ones(batch_size, dtype=torch.bool))
 
         state = None if 'questions' not in batch else batch['questions']
-        cache = {'key':{},'value':{}}
         for t in range(max_generation_len):
             logits = self.module.get_logits(batch, state)
 
@@ -500,14 +490,65 @@ class TopKSampler(TextSampler):
         return sents
 
 
-class TwoStageTopKSampler(TextSampler):
+class TwoStageSampler(TextSampler):
     
-    def __init__(self, module, base_k=5, end_token=None):
+    def __init__(self, module, base_k=5, end_token=None, question_answer_sep_token=None):
         super().__init__(module, end_token)
         self.base_k = base_k
+        self.question_answer_sep_token = question_answer_sep_token
     
     def sample(self, batch):
-        pass
+        batch = self.clone_batch(batch)
+        batch = reshape_tensor(batch)
+        
+        max_generation_len = 30
+        batch_size = self.module.get_batch_size(batch)
+        # output sentence placeholder and unfinished flag.
+        sentences = ToCuda(torch.zeros((batch_size, max_generation_len), dtype=torch.long).fill_(self.end_token))
+        unfinished = ToCuda(torch.ones(batch_size, dtype=torch.bool))
+        # question part flag.
+        question_part = ToCuda(torch.ones(batch_size, dtype=torch.bool))
+        # answer probability sum total and answer token length count(to compute average probability).
+        prob_sum = ToCuda(torch.zeros(batch_size))
+        len_count = ToCuda(torch.zeros(batch_size))
+        # current output state.
+        state = None
+        
+        for t in range(max_generation_len):
+            logits = self.module.get_logits(batch, state)
+
+            prob_sum, len_count = prob_sum.type_as(logits), len_count.type_as(logits)
+
+            # topk sample
+            topk_index = logits.topk(self.base_k, dim=1)[1]
+            topk_logits = logits.gather(1, topk_index)
+            topk_probs = F.softmax(topk_logits, dim=1)
+            topk_wt = torch.gather(topk_index, 1, torch.multinomial(topk_probs, 1)).view(-1).long()
+            
+            # greedy sample
+            greedy_wt = torch.argmax(logits, dim=1).view(-1).long()
+            # question part flag and unfinished flag
+            question_part = question_part * (greedy_wt != self.question_answer_sep_token)
+            unfinished = unfinished * (greedy_wt != self.end_token)
+            
+            # select token
+            wt = (topk_wt * question_part.type_as(topk_wt) + (1 - question_part.type_as(topk_wt)) * greedy_wt) * unfinished.type_as(topk_wt) + (1 - unfinished.type_as(topk_wt)) * self.end_token
+            sentences[:, t] = wt
+
+            state = wt.unsqueeze(1) if state is None else torch.cat((state, wt.unsqueeze(1)), dim=1)
+
+            # compute average probability of predicted answers.
+            answer_part = unfinished.type_as(logits) * (1 - question_part.type_as(logits))
+            len_count += answer_part
+            prob_sum += answer_part * torch.gather(F.softmax(logits, dim=1), 1, greedy_wt.unsqueeze(1)).squeeze(1)
+
+            if unfinished.sum() == 0:
+                break
+        
+        avg_prob = prob_sum / len_count
+        avg_prob = torch.where(torch.isnan(avg_prob), torch.zeros(1).type_as(avg_prob), avg_prob)
+        
+        return sentences, avg_prob
 
 
 class ModelWrapper(nn.Module):

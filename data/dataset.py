@@ -37,6 +37,8 @@ class Tokenizer:
         self.task_prompt_sep_token = self.tokenizer.convert_tokens_to_ids(['[unused0]'])[0]
         # question answer sep token
         self.question_answer_sep_token = self.tokenizer.convert_tokens_to_ids(['[unused1]'])[0]
+        # answer type mask token
+        self.answer_type_mask_token = self.tokenizer.convert_tokens_to_ids(['[unused2]'])[0]
         assert self.cls_token == 101 and self.sep_token == 102, 'The cls token or the sep token does not match the correct id.'
 
     def tokenize(self, text: str, max_len: int = None):
@@ -230,12 +232,16 @@ class QuestionCaptionProcessor(TextProcessor):
             item = self.vqa.loadQA(q_id)[0]
             answer = item['multiple_choice_answer']
             answer_type = item['answer_type']
+            if answer_type == 'yes/no':
+                random_answer_type = 'yes' if random.random() < 0.5 else 'no'
+                answer_type = 'yes' if answer == 'yes' else 'no' if answer == 'no' else random_answer_type
+            if answer_type == 'number' and answer == '0':
+                answer_type = 'zero'
             # similar_token = 'similar' if similar else 'different'
             
             # tip = self.concat_tokens([answer_type, similar_token, img_caption], self.tokenizer.task_prompt_sep_token)
             tip = self.concat_tokens([answer_type, img_caption], self.tokenizer.task_prompt_sep_token)
-            # max_len + 4 because of the concatenation of answer type prompt.
-            tip = self.tokenizer.get_padded_tokens(tip, max_len=self.tokenizer.max_len + 4).unsqueeze(0)
+            tip = self.tokenizer.get_padded_tokens(tip).unsqueeze(0)
             target = self.concat_tokens([question, answer], self.tokenizer.question_answer_sep_token)
             target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
             targets.append(target)

@@ -177,6 +177,8 @@ class BaseQuestioner(QuestionerModule):
         if self.auto_regressive is False:
             # random mask the target.
             target, labels = self.masker(target, 0.6, answer_mask=self._forward_answer)
+            if self._forward_answer is True:
+                tip[:, 1] = self.tokenizer.answer_type_mask_token
             output_txt = self.video_language_process(img, tip, target)
             output_txt = output_txt[labels != -1]
             prediction_scores = self.cls_head(output_txt)

@@ -16,6 +16,7 @@ from utils.callbacks import MyCallback
 from utils.handlers import set_handler
 from torch.optim.lr_scheduler import LambdaLR
 import warnings
+from torch_lib.util import NOTHING
 
 warnings.filterwarnings("ignore")
 
@@ -55,13 +56,14 @@ def main():
     model = DDP(model)
     
     # resume
-    # checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
+    # checkpoint = torch.load('./log/answer_type_only_224/checkpoint/best.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['model'])
     # optimizer.load_state_dict(checkpoint['optimizer'])
     # del checkpoint
     # build dataset
-    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 256)
-    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 256)
+    # train_dataset = NOTHING
+    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 128)
+    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 128)
     # torch-lib pipeline
     proxy = Proxy(model)
     set_handler(proxy)

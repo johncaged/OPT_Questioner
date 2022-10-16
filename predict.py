@@ -1,11 +1,15 @@
 from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, QuestionerWithCaption, TextSampler, TopKSampler, BeamSampler, TwoStageSampler
-from data.dataset import Tokenizer, build_dataset, CaptionProcessor, build_cc3m_dataset, CC3MDataset
+from data.dataset import Tokenizer, build_dataset, CaptionProcessor, build_cc3m_dataset, CC3MDataset, build_dataloader
 from torch.utils.data import DataLoader
 from utils import ToCuda
 import torch
 import json
 from torch_lib.util import Count
 import time
+import torch.distributed as dist
+import warnings
+
+warnings.filterwarnings("ignore")
 
 
 # w/o distributed running
@@ -15,6 +19,13 @@ def main():
         q_id = Count()
     
     q_id_gen = QuestionIdGen()
+    
+    # parallel
+    dist.init_process_group('nccl')
+    rank = dist.get_rank()
+    torch.cuda.set_device(rank)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.enabled = True
     
     with torch.no_grad():
         # with open('images.json') as f:
@@ -26,19 +37,20 @@ def main():
         # model = BaseQuestioner(tokenizer, QuestionerWithAnswer(), auto_regressive=True)
         model = ModelWrapper(model)
         # checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
-        checkpoint = torch.load('./log/main2/checkpoint/checkpoint_10.pth', map_location='cpu')
+        checkpoint = torch.load('./log/answer_type_only_224/checkpoint/best.pth', map_location='cpu')
         model.load_state_dict(checkpoint['model'])
         model.eval()
         del checkpoint
-        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=5, question_answer_sep_token=tokenizer.question_answer_sep_token))
+        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=6, question_answer_sep_token=tokenizer.question_answer_sep_token))
         # model: TextSampler = ToCuda(TopKSampler(model.module, end_token=tokenizer.question_answer_sep_token, k=5))
         # answer_model: TextSampler = ToCuda(TopKSampler(model.module, k=1))
         # answer_model: TextSampler = ToCuda(BeamSampler(model.module))
         # val_dataset = DataLoader(build_dataset('caption_only', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
         # val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
         # val_dataset = DataLoader(build_dataset('caption', 'val', tokenizer, 'all', text_encoder=model.module.clip), batch_size=1, shuffle=True)
-        batch_size = 64
-        val_dataset = DataLoader(build_cc3m_dataset(tokenizer), batch_size=batch_size, shuffle=True, collate_fn=CC3MDataset.collate_fn)
+        batch_size = 4096
+        # val_dataset = DataLoader(build_cc3m_dataset(tokenizer), batch_size=batch_size, shuffle=True, collate_fn=CC3MDataset.collate_fn)
+        val_dataset = build_dataloader(build_cc3m_dataset(tokenizer), batch_size=batch_size, collate_fn=CC3MDataset.collate_fn)
         
         detach = lambda x: x.detach().cpu().tolist()
         
@@ -47,12 +59,9 @@ def main():
         }
         
         types = [
-            *[{'answer_type': 'yes/no', 'similar': True} for _ in range(3)],
-            *[{'answer_type': 'yes/no', 'similar': False} for _ in range(3)],
-            *[{'answer_type': 'number', 'similar': True} for _ in range(3)],
-            *[{'answer_type': 'number', 'similar': False} for _ in range(3)],
-            *[{'answer_type': 'other', 'similar': True} for _ in range(3)],
-            *[{'answer_type': 'other', 'similar': False} for _ in range(3)]
+            *[{'answer_type': 'yes/no'} for _ in range(3)],
+            *[{'answer_type': 'number'} for _ in range(3)],
+            *[{'answer_type': 'other'} for _ in range(3)]
         ]
         
         repeat_sample = len(types)
@@ -79,7 +88,9 @@ def main():
             # append_to_file('result.txt', 'Choose Image: {0}\n\n'.format(img_ids[0]))
             
             for j in range(repeat_sample):
-                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, types[j]['answer_type'], types[j]['similar'], tokenizer)
+                start_sample = time.time()
+                
+                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, types[j]['answer_type'], False, tokenizer)
                 
                 # append_to_file('result.txt', 'Answer Type: {0}, Similar: {1}\n'.format(types[j]['answer_type'], types[j]['similar']))
                 
@@ -105,7 +116,6 @@ def main():
                 # answer_prediction = answer_model(batch[0])
                 
                 # del batch[0]['questions']
-                print('sample {}'.format(j))
 
                 for answer, question, prob, img_id in zip(convert_items(detach(prediction), tokenizer, start_token=tokenizer.question_answer_sep_token),
                                                           convert_items(detach(prediction), tokenizer, end_token=tokenizer.question_answer_sep_token),
@@ -135,7 +145,10 @@ def main():
                     #     prob
                     # )))
                 # append_to_file('result.txt', '\n')
-                print('sample {} finished'.format(j))
+                end_sample = time.time()
+                
+                if dist.get_rank() == 0:
+                    print('sample {} - time {}s'.format(j, end_sample - start_sample))
             # items = map(lambda x: int(x), list(set(img)))
             # all_images['images'].extend(items)
             for img_id, img_data in data_to_select.items():
@@ -148,7 +161,7 @@ def main():
                     _data['question_id'] = q_id_gen.q_id
                 data['data'].extend(selected_data)
             
-            with open('dataset.json', 'w') as f:
+            with open('dataset_{}.json'.format(dist.get_rank()), 'w') as f:
                 json.dump(data, f, indent=4)
             # with open('images.json', 'w') as f:
             #     json.dump(all_images, f, indent=4)
@@ -157,7 +170,7 @@ def main():
                 break
             
             end_time = time.time()
-            print('Iter: {} - Step Time: {} - ETA: {}s'.format(i, end_time - start_time, (end_time - start_time) * (max_iter - i - 1)))
+            print('Rank: {} - Iter: {} - Step Time: {} - ETA: {}s'.format(dist.get_rank(), i, end_time - start_time, (end_time - start_time) * (max_iter - i - 1)))
 
 
 def append_to_file(path, content):

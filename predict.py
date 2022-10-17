@@ -8,6 +8,7 @@ from torch_lib.util import Count
 import time
 import torch.distributed as dist
 import warnings
+import random
 
 warnings.filterwarnings("ignore")
 
@@ -41,14 +42,15 @@ def main():
         model.load_state_dict(checkpoint['model'])
         model.eval()
         del checkpoint
-        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=6, question_answer_sep_token=tokenizer.question_answer_sep_token))
+        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=5, question_answer_sep_token=tokenizer.question_answer_sep_token, answer_type_mask_token=tokenizer.answer_type_mask_token))
         # model: TextSampler = ToCuda(TopKSampler(model.module, end_token=tokenizer.question_answer_sep_token, k=5))
         # answer_model: TextSampler = ToCuda(TopKSampler(model.module, k=1))
         # answer_model: TextSampler = ToCuda(BeamSampler(model.module))
         # val_dataset = DataLoader(build_dataset('caption_only', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
         # val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, 'all'), batch_size=1, shuffle=True)
         # val_dataset = DataLoader(build_dataset('caption', 'val', tokenizer, 'all', text_encoder=model.module.clip), batch_size=1, shuffle=True)
-        batch_size = 4096
+        # batch_size = 2048
+        batch_size = 1024
         # val_dataset = DataLoader(build_cc3m_dataset(tokenizer), batch_size=batch_size, shuffle=True, collate_fn=CC3MDataset.collate_fn)
         val_dataset = build_dataloader(build_cc3m_dataset(tokenizer), batch_size=batch_size, collate_fn=CC3MDataset.collate_fn)
         
@@ -59,14 +61,17 @@ def main():
         }
         
         types = [
-            *[{'answer_type': 'yes/no'} for _ in range(3)],
+            *[{'answer_type': 'yes/no'} for _ in range(4)],
             *[{'answer_type': 'number'} for _ in range(3)],
             *[{'answer_type': 'other'} for _ in range(3)]
         ]
         
+        no_prob = 0.5
+        zero_prob = 1e-4
+        
         repeat_sample = len(types)
         
-        max_iter = 300000 // batch_size
+        max_iter = 100000 // batch_size
         
         for i, batch in enumerate(val_dataset):
             start_time = time.time()
@@ -90,7 +95,13 @@ def main():
             for j in range(repeat_sample):
                 start_sample = time.time()
                 
-                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, types[j]['answer_type'], False, tokenizer)
+                answer_type = types[j]['answer_type']
+                if answer_type == 'yes/no':
+                    answer_type = 'no' if random.random() < no_prob else 'yes'
+                elif answer_type == 'number':
+                    answer_type = 'zero' if random.random() < zero_prob else 'number'
+                
+                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, answer_type, False, tokenizer)
                 
                 # append_to_file('result.txt', 'Answer Type: {0}, Similar: {1}\n'.format(types[j]['answer_type'], types[j]['similar']))
                 
@@ -153,9 +164,9 @@ def main():
             # all_images['images'].extend(items)
             for img_id, img_data in data_to_select.items():
                 selected_data = []
-                selected_data.extend(sorted(img_data['yes/no'], key=lambda item: item['prob'], reverse=True)[0:2])
-                selected_data.extend(sorted(img_data['number'], key=lambda item: item['prob'], reverse=True)[0:2])
-                selected_data.extend(sorted(img_data['other'], key=lambda item: item['prob'], reverse=True)[0:2])
+                selected_data.extend(sorted(img_data['yes/no'], key=lambda item: item['prob'], reverse=True)[0:4])
+                selected_data.extend(sorted(img_data['number'], key=lambda item: item['prob'], reverse=True)[0:3])
+                selected_data.extend(sorted(img_data['other'], key=lambda item: item['prob'], reverse=True)[0:3])
                 for _data in selected_data:
                     _data['img_id'] = img_id
                     _data['question_id'] = q_id_gen.q_id

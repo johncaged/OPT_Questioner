@@ -494,10 +494,11 @@ class TopKSampler(TextSampler):
 
 class TwoStageSampler(TextSampler):
     
-    def __init__(self, module, base_k=5, end_token=None, question_answer_sep_token=None):
+    def __init__(self, module, base_k=5, end_token=None, question_answer_sep_token=None, answer_type_mask_token=None):
         super().__init__(module, end_token)
         self.base_k = base_k
         self.question_answer_sep_token = question_answer_sep_token
+        self.answer_type_mask_token = answer_type_mask_token
     
     def sample(self, batch):
         batch = self.clone_batch(batch)
@@ -513,25 +514,32 @@ class TwoStageSampler(TextSampler):
         # answer probability sum total and answer token length count(to compute average probability).
         prob_sum = ToCuda(torch.zeros(batch_size))
         len_count = ToCuda(torch.zeros(batch_size))
+        # answer type mask token
+        answer_type_mask_token = torch.ones(batch_size).type_as(batch['tips']) * self.answer_type_mask_token
         # current output state.
         state = None
         
         for t in range(max_generation_len):
+            # mask answer type if answer part.
+            batch['tips'][:, 1] = answer_type_mask_token * (1 - question_part.type_as(batch['tips'])) + batch['tips'][:, 1] * question_part.type_as(batch['tips'])
             logits = self.module.get_logits(batch, state)
 
             prob_sum, len_count = prob_sum.type_as(logits), len_count.type_as(logits)
 
-            # topk sample
-            topk_index = logits.topk(self.base_k, dim=1)[1]
-            topk_logits = logits.gather(1, topk_index)
-            topk_probs = F.softmax(topk_logits, dim=1)
-            topk_wt = torch.gather(topk_index, 1, torch.multinomial(topk_probs, 1)).view(-1).long()
-            
             # greedy sample
             greedy_wt = torch.argmax(logits, dim=1).view(-1).long()
             # question part flag and unfinished flag
             question_part = question_part * (greedy_wt != self.question_answer_sep_token)
-            unfinished = unfinished * (greedy_wt != self.end_token)
+            unfinished = (unfinished * (greedy_wt != self.end_token)) | question_part
+
+            # topk sample
+            # topk should not sample [SEP] token or [unused1] token.
+            logits[:, self.end_token] = -1e5
+            logits[:, self.question_answer_sep_token] = -1e5
+            topk_index = logits.topk(self.base_k, dim=1)[1]
+            topk_logits = logits.gather(1, topk_index)
+            topk_probs = F.softmax(topk_logits, dim=1)
+            topk_wt = torch.gather(topk_index, 1, torch.multinomial(topk_probs, 1)).view(-1).long()
             
             # select token
             wt = (topk_wt * question_part.type_as(topk_wt) + (1 - question_part.type_as(topk_wt)) * greedy_wt) * unfinished.type_as(topk_wt) + (1 - unfinished.type_as(topk_wt)) * self.end_token

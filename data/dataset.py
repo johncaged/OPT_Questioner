@@ -235,7 +235,7 @@ class QuestionCaptionProcessor(TextProcessor):
             if answer_type == 'yes/no':
                 random_answer_type = 'yes' if random.random() < 0.5 else 'no'
                 answer_type = 'yes' if answer == 'yes' else 'no' if answer == 'no' else random_answer_type
-            if answer_type == 'number' and answer == '0':
+            elif answer_type == 'number' and answer == '0':
                 answer_type = 'zero'
             # similar_token = 'similar' if similar else 'different'
             
@@ -423,7 +423,7 @@ class CaptionProcessor:
 
     @staticmethod
     def attach_task_prompt(caption, answer_type, similar: bool, tokenizer: Tokenizer):
-        assert answer_type in ['yes/no', 'number', 'other']
+        assert answer_type in ['yes', 'no', 'zero', 'number', 'other']
         batch_size = caption.shape[0]
         torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
         

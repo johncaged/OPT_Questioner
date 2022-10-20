@@ -46,9 +46,9 @@ def main():
     tokenizer = Tokenizer()
     # build and load model
     model = BaseQuestioner(tokenizer, QuestionerWithCaption())
-    model.load_pretrained_weights()
+    # model.load_pretrained_weights()
     # optimizer
-    optimizer = Adam(model.parameters(), lr=3e-6)
+    optimizer = Adam(model.parameters(), lr=1e-5)
     
     # create model and move it to GPU with id rank
     device_id = rank % torch.cuda.device_count()
@@ -56,19 +56,20 @@ def main():
     model = DDP(model)
     
     # resume
-    # checkpoint = torch.load('./log/answer_type_only_224/checkpoint/best.pth', map_location='cpu')
-    # model.load_state_dict(checkpoint['model'])
-    # optimizer.load_state_dict(checkpoint['optimizer'])
-    # del checkpoint
+    checkpoint = torch.load('./log/answer_type_224_512/checkpoint/checkpoint_19.pth', map_location='cpu')
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    del checkpoint
     # build dataset
-    # train_dataset = NOTHING
-    train_dataset = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 128)
-    val_dataset = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 128)
+    train_dataset = NOTHING
+    # train_dataset, train_sampler = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 512)
+    val_dataset, _ = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
     # torch-lib pipeline
     proxy = Proxy(model)
+    proxy.custom.train_sampler = train_sampler
     set_handler(proxy)
     proxy.count_params('M')
-    total_epoch = 20
+    total_epoch = 200
     proxy.build(
         loss=Loss(label_smoothing=0.0),
         optimizer=optimizer,
@@ -78,7 +79,7 @@ def main():
         train_dataset,
         total_epoch,
         val_dataset,
-        callbacks=MyCallback()
+        # callbacks=MyCallback()
     )
 
 

@@ -502,8 +502,8 @@ def build_cc3m_dataset(
 def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True, collate_fn=None):
     config = parse_yaml(default_config_path)
     batch_size = batch_size // dist.get_world_size()
-    sampler = CustomDistributedSampler(dataset)
-    return DataLoader(dataset, sampler=sampler, batch_size=batch_size, collate_fn=collate_fn, num_workers=config['num_workers'], pin_memory=config['pin_memory'])
+    sampler = CustomDistributedSampler(dataset, shuffle=shuffle)
+    return DataLoader(dataset, sampler=sampler, batch_size=batch_size, collate_fn=collate_fn, num_workers=config['num_workers'], pin_memory=config['pin_memory']), sampler
 
 
 def reshape_tensor(batch):

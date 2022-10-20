@@ -533,9 +533,12 @@ class TwoStageSampler(TextSampler):
             unfinished = (unfinished * (greedy_wt != self.end_token)) | question_part
 
             # topk sample
+            # clone logits before changing its values.
+            logits_original = logits.clone()
             # topk should not sample [SEP] token or [unused1] token.
-            logits[:, self.end_token] = -1e5
-            logits[:, self.question_answer_sep_token] = -1e5
+            eps = float(torch.min(logits).clone().detach().cpu()) - 1
+            logits[:, self.end_token] = eps
+            logits[:, self.question_answer_sep_token] = eps
             topk_index = logits.topk(self.base_k, dim=1)[1]
             topk_logits = logits.gather(1, topk_index)
             topk_probs = F.softmax(topk_logits, dim=1)
@@ -548,9 +551,9 @@ class TwoStageSampler(TextSampler):
             state = wt.unsqueeze(1) if state is None else torch.cat((state, wt.unsqueeze(1)), dim=1)
 
             # compute average probability of predicted answers.
-            answer_part = unfinished.type_as(logits) * (1 - question_part.type_as(logits))
+            answer_part = unfinished.type_as(logits_original) * (1 - question_part.type_as(logits_original))
             len_count += answer_part
-            prob_sum += answer_part * torch.gather(F.softmax(logits, dim=1), 1, greedy_wt.unsqueeze(1)).squeeze(1)
+            prob_sum += answer_part * torch.gather(F.softmax(logits_original, dim=1), 1, greedy_wt.unsqueeze(1)).squeeze(1)
 
             if unfinished.sum() == 0:
                 break

@@ -17,3 +17,8 @@ class MyCallback(Callback):
     def epoch_end(self, ctx):
         if self.rank == 0:
             self.callback.epoch_end(ctx)
+
+    def epoch_begin(self, ctx):
+        # set random seed
+        ctx.ctx_check('custom.train_sampler', silent=False)
+        ctx.custom.train_sampler.set_epoch(ctx.epoch.current)

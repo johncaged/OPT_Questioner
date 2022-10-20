@@ -1,10 +1,9 @@
 from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, QuestionerWithCaption, TextSampler, TopKSampler, BeamSampler, TwoStageSampler
 from data.dataset import Tokenizer, build_dataset, CaptionProcessor, build_cc3m_dataset, CC3MDataset, build_dataloader
 from torch.utils.data import DataLoader
-from utils import ToCuda
+from utils import ToCuda, QuestionIdGen
 import torch
 import json
-from torch_lib.util import Count
 import time
 import torch.distributed as dist
 import warnings
@@ -15,10 +14,6 @@ warnings.filterwarnings("ignore")
 
 # w/o distributed running
 def main():
-    
-    class QuestionIdGen:
-        q_id = Count()
-    
     q_id_gen = QuestionIdGen()
     
     # parallel
@@ -42,7 +37,7 @@ def main():
         model.load_state_dict(checkpoint['model'])
         model.eval()
         del checkpoint
-        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=5, question_answer_sep_token=tokenizer.question_answer_sep_token, answer_type_mask_token=tokenizer.answer_type_mask_token))
+        model: TextSampler = ToCuda(TwoStageSampler(model.module, base_k=10, question_answer_sep_token=tokenizer.question_answer_sep_token))
         # model: TextSampler = ToCuda(TopKSampler(model.module, end_token=tokenizer.question_answer_sep_token, k=5))
         # answer_model: TextSampler = ToCuda(TopKSampler(model.module, k=1))
         # answer_model: TextSampler = ToCuda(BeamSampler(model.module))
@@ -52,7 +47,7 @@ def main():
         # batch_size = 2048
         batch_size = 1024
         # val_dataset = DataLoader(build_cc3m_dataset(tokenizer), batch_size=batch_size, shuffle=True, collate_fn=CC3MDataset.collate_fn)
-        val_dataset = build_dataloader(build_cc3m_dataset(tokenizer), batch_size=batch_size, collate_fn=CC3MDataset.collate_fn)
+        val_dataset, _ = build_dataloader(build_cc3m_dataset(tokenizer), batch_size=batch_size, collate_fn=CC3MDataset.collate_fn)
         
         detach = lambda x: x.detach().cpu().tolist()
         
@@ -62,11 +57,11 @@ def main():
         
         types = [
             *[{'answer_type': 'yes/no'} for _ in range(4)],
-            *[{'answer_type': 'number'} for _ in range(3)],
-            *[{'answer_type': 'other'} for _ in range(3)]
+            *[{'answer_type': 'number'} for _ in range(2)],
+            *[{'answer_type': 'other'} for _ in range(4)]
         ]
         
-        no_prob = 0.5
+        no_prob = 0.75
         zero_prob = 1e-4
         
         repeat_sample = len(types)

@@ -109,8 +109,6 @@ class TextProcessor:
     ):
         super().__init__()
         self.vqa = VQA(annotation_path, question_path)
-        self.ids = list(set(self.vqa.getImgIds()))
-        self.data_size = len(self.ids)
         self.confident = confident
         self.tokenizer = tokenizer
         
@@ -120,9 +118,6 @@ class TextProcessor:
     
     def process(self, image_id, image_name):
         pass
-
-    def get_image_id_through_index(self, index):
-        return self.ids[index]
     
     def get_tokenized_text_pair(self, text1, text2):
         """Get a single tokenized text pair.
@@ -300,17 +295,20 @@ class VQADataset(Dataset):
         image_processor: ImageProcessor,
         text_processor: TextProcessor,
         image_path: str,
-        image_prefix: str
+        image_prefix: str,
+        id_path: str
     ):
         super().__init__()
         self.image_path = image_path
         self.image_prefix = image_prefix
         self.image_processor = image_processor
         self.text_processor = text_processor
+        with open(id_path) as f:
+            self.ids = json.load(f)
 
     def __getitem__(self, index):
         # get image
-        image_id = self.text_processor.get_image_id_through_index(index)
+        image_id = self.ids[index]
         image_name = f'{self.image_prefix}{image_id:012}'
         image_path = os.path.join(self.image_path, f'{image_name}.jpg')
         img = Image.open(image_path)
@@ -329,7 +327,7 @@ class VQADataset(Dataset):
         return {'imgs': imgs, 'tips': tips, 'targets': targets}, targets, [str(image_id)] * tips.size()[0]
 
     def __len__(self):
-        return self.text_processor.data_size
+        return len(self.ids)
 
 
 def build_dataset(
@@ -346,6 +344,7 @@ def build_dataset(
 ):
     img_processor_dict = {
         'train': TrainImageProcessor,
+        'train2': TrainImageProcessor,
         'val': ValImageProcessor
     }
     config = parse_yaml(default_config_path)
@@ -355,7 +354,7 @@ def build_dataset(
     text_processor = QuestionAnswerProcessor(multiple_choice_answer, quesTypes, ansTypes, items['question'], items['annotation'], tokenizer, text_mode, confident) if dataset_type == 'answer' else \
         QuestionCaptionProcessor(items['caption'], text_encoder, k, items['question'], items['annotation'], tokenizer, text_mode) if dataset_type == 'caption' else \
         None
-    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'])
+    return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'], items['id_path'])
 
 
 class CustomDistributedSampler(DistributedSampler):

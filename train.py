@@ -46,7 +46,7 @@ def main():
     tokenizer = Tokenizer()
     # build and load model
     model = BaseQuestioner(tokenizer, QuestionerWithCaption())
-    # model.load_pretrained_weights()
+    model.load_pretrained_weights()
     # optimizer
     optimizer = Adam(model.parameters(), lr=1e-5)
     
@@ -56,13 +56,16 @@ def main():
     model = DDP(model)
     
     # resume
-    checkpoint = torch.load('./log/answer_type_224_512/checkpoint/checkpoint_19.pth', map_location='cpu')
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    del checkpoint
+    # checkpoint = torch.load('./log/answer_type_224_512/checkpoint/checkpoint_19.pth', map_location='cpu')
+    # model.load_state_dict(checkpoint['model'])
+    # optimizer.load_state_dict(checkpoint['optimizer'])
+    # del checkpoint
     # build dataset
-    train_dataset = NOTHING
-    # train_dataset, train_sampler = build_dataloader(build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip), 512)
+    # train_dataset = NOTHING
+    train_data = build_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip)
+    train2_data = build_dataset('caption', 'train2', tokenizer, text_encoder=model.module.clip)
+    train_dataset, train_sampler = build_dataloader(train_data + train2_data, 512)
+    del train_data, train2_data
     val_dataset, _ = build_dataloader(build_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
     # torch-lib pipeline
     proxy = Proxy(model)

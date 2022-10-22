@@ -8,6 +8,7 @@ import time
 import torch.distributed as dist
 import warnings
 import random
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -51,14 +52,22 @@ def main():
         
         detach = lambda x: x.detach().cpu().tolist()
         
-        data = {
-            'data': []
-        }
+        if os.path.exists('dataset_{}.json'.format(dist.get_rank())):
+            with open('dataset_{}.json'.format(dist.get_rank())) as f:
+                data = json.load(f)
+        else:
+            data = {
+                'data': []
+            }
+        
+        yes_no_per_img = 4
+        number_per_img = 4
+        other_per_img = 4
         
         types = [
-            *[{'answer_type': 'yes/no'} for _ in range(4)],
-            *[{'answer_type': 'number'} for _ in range(2)],
-            *[{'answer_type': 'other'} for _ in range(4)]
+            *[{'answer_type': 'yes/no'} for _ in range(yes_no_per_img)],
+            *[{'answer_type': 'number'} for _ in range(number_per_img)],
+            *[{'answer_type': 'other'} for _ in range(other_per_img)]
         ]
         
         no_prob = 0.75
@@ -159,9 +168,9 @@ def main():
             # all_images['images'].extend(items)
             for img_id, img_data in data_to_select.items():
                 selected_data = []
-                selected_data.extend(sorted(img_data['yes/no'], key=lambda item: item['prob'], reverse=True)[0:4])
-                selected_data.extend(sorted(img_data['number'], key=lambda item: item['prob'], reverse=True)[0:3])
-                selected_data.extend(sorted(img_data['other'], key=lambda item: item['prob'], reverse=True)[0:3])
+                selected_data.extend(img_data['yes/no'])
+                selected_data.extend(img_data['number'])
+                selected_data.extend(img_data['other'])
                 for _data in selected_data:
                     _data['img_id'] = img_id
                     _data['question_id'] = q_id_gen.q_id

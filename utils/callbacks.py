@@ -1,6 +1,7 @@
 import torch.distributed as dist
 from torch_lib.callback import Callback, CallbackContainer
 from torch_lib.callback.common import SaveMetrics, SaveCheckpoint
+import os
 
 
 class MyCallback(Callback):
@@ -22,3 +23,8 @@ class MyCallback(Callback):
         # set random seed
         ctx.ctx_check('custom.train_sampler', silent=False)
         ctx.custom.train_sampler.set_epoch(ctx.epoch.current)
+
+    def step_end(self, ctx):
+        # print new line in slurm mode to avoid output could not be seen.
+        if 'SLURM_PROCID' in os.environ and self.rank == 0:
+            print()

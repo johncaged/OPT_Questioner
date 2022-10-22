@@ -3,7 +3,7 @@ from model.model import BaseQuestioner, QuestionerWithCaption
 import os
 from data.dataset import Tokenizer, build_dataloader, build_dataset
 from utils.loss import Loss, MixLoss
-from utils import parse_yaml, default_config_path
+from utils import ToCuda, parse_yaml, default_config_path
 from torch.optim import Adam
 import torch.distributed as dist
 from apex.parallel import DistributedDataParallel as DDP
@@ -17,8 +17,9 @@ from utils.handlers import set_handler
 from torch.optim.lr_scheduler import LambdaLR
 import warnings
 from torch_lib.util import NOTHING
+import subprocess
 
-warnings.filterwarnings("ignore")
+warnings.filterwarnings('ignore')
 
 config = parse_yaml(default_config_path)
 set_base_path(config['base_path'])
@@ -28,16 +29,60 @@ set_namespace(config['namespace'])
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--local_rank', type=int, default=-1)
+    parser.add_argument('--use_slurm', type=str2bool, default=False)
+    parser.add_argument('--master_address', type=str, default=None)
+    parser.add_argument('--master_port', type=str, default=None)
     parser.add_argument('--fp16', action='store_true')
     return parser.parse_args()
+
+
+def setup_DDP(backend='nccl', address=None, port=None, verbose=False):
+    '''Initialize slurm distributed training environment.
+    '''
+    proc_id = int(os.environ['SLURM_PROCID'])
+    ntasks = int(os.environ['SLURM_NTASKS'])
+    node_list = os.environ['SLURM_NODELIST']
+    num_gpus = torch.cuda.device_count()
+    addr = subprocess.getoutput(f'scontrol show hostname {node_list} | head -n1')
+    # specify master port
+    if port is not None:
+        os.environ['MASTER_PORT'] = str(port)
+    elif 'MASTER_PORT' not in os.environ:
+        os.environ['MASTER_PORT'] = '29500'
+    # specify master address
+    if address is not None:
+        os.environ['MASTER_ADDR'] = address
+    elif 'MASTER_ADDR' not in os.environ:
+        os.environ['MASTER_ADDR'] = addr
+    os.environ['WORLD_SIZE'] = str(ntasks)
+    os.environ['LOCAL_RANK'] = str(proc_id % num_gpus)
+    os.environ['RANK'] = str(proc_id)
+
+    # The following code is the same as the setup_DDP() code in single-machine-and-multi-GPU-DistributedDataParallel-launch.py
+    rank = int(os.environ['RANK'])
+    local_rank = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+    # If the OS is Windows or macOS, use gloo instead of nccl
+    dist.init_process_group(backend=backend)
+    # set distributed device
+    device = torch.device('cuda:{}'.format(local_rank))
+    if verbose:
+        print('Using device: {}'.format(device))
+        print(f'local rank: {local_rank}, global rank: {rank}, world size: {world_size}')
+    return rank, local_rank, world_size, device
 
 
 def main():
     args = get_args()
     
     # parallel
-    dist.init_process_group('nccl')
-    rank = dist.get_rank()
+    if args.use_slurm is False:
+        dist.init_process_group('nccl')
+        rank = dist.get_rank()
+    else:
+        print('use slurm to run distributed pytorch program.')
+        _, rank, _, _ = setup_DDP(address=args.master_address, port=args.master_port)
+
     torch.cuda.set_device(rank)
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
@@ -50,9 +95,7 @@ def main():
     # optimizer
     optimizer = Adam(model.parameters(), lr=1e-5)
     
-    # create model and move it to GPU with id rank
-    device_id = rank % torch.cuda.device_count()
-    model, optimizer = amp.initialize(model.to(device_id), optimizer, enabled=args.fp16, opt_level='O2')
+    model, optimizer = amp.initialize(ToCuda(model), optimizer, enabled=args.fp16, opt_level='O2')
     model = DDP(model)
     
     # resume
@@ -72,7 +115,7 @@ def main():
     proxy.custom.train_sampler = train_sampler
     set_handler(proxy)
     proxy.count_params('M')
-    total_epoch = 200
+    total_epoch = 50
     proxy.build(
         loss=Loss(label_smoothing=0.0),
         optimizer=optimizer,
@@ -82,8 +125,19 @@ def main():
         train_dataset,
         total_epoch,
         val_dataset,
-        # callbacks=MyCallback()
+        callbacks=MyCallback()
     )
+
+
+def str2bool(b):
+    if b.lower() in ["false"]:
+        return False
+    elif b.lower() in ["true"]:
+        return True
+    elif b is None:
+        return None
+    else:
+        raise Exception("Invalid Bool Value")
 
 
 if __name__ == '__main__':

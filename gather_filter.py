@@ -2,21 +2,26 @@ import json
 import os
 from utils import QuestionIdGen
 import random
+import glob
 
 
-def main(num, base_path='./'):
+def main(base_path='./'):
     q_id_gen = QuestionIdGen()
     
     data = []
     
-    for i in range(num):
-        with open(os.path.join(base_path, 'dataset_{}.json'.format(i))) as f:
+    datasets = glob.glob('dataset_[0-9]*.json')
+    
+    for dataset in datasets:
+        with open(dataset) as f:
             data.extend(json.load(f)['data'])
     
     for item in data:
         item['question_id'] = q_id_gen.q_id
     
     data = list(filter(lambda item: '[unused1]' not in item['question'] and '[unused1]' not in item['answer'] and item['prob'] > 0, data))
+    
+    print('raw length: {}'.format(len(data)))
     
     with open(os.path.join(base_path, 'raw_dataset.json'), mode='w') as f:
         json.dump({'data': data}, f, indent=4)
@@ -26,6 +31,8 @@ def main(num, base_path='./'):
     
     data_img, _ = create_index(data)
     
+    print('generated imgs: {}'.format(len(data_img)))
+    
     filtered_data = []
     
     for img_id, items in data_img.items():
@@ -34,7 +41,7 @@ def main(num, base_path='./'):
         number_items = sorted(list(filter(lambda item: item['type'] == 'number', items)), key=lambda item: item['prob'], reverse=True)
         other_items = sorted(list(filter(lambda item: item['type'] == 'other', items)), key=lambda item: item['prob'], reverse=True)
         
-        yes_no_cnt =  1 if random.random() < 0.5 else 2
+        yes_no_cnt = 1 if random.random() < 0.5 else 2
         for _ in range(yes_no_cnt):
             try:
                 if random.random() < no_cnt / (yes_cnt + no_cnt):
@@ -59,6 +66,12 @@ def main(num, base_path='./'):
     number_items = list(filter(lambda item: item['type'] == 'number', filtered_data))
     other_items = list(filter(lambda item: item['type'] == 'other', filtered_data))
     
+    print('filtered length: {}'.format(len(filtered_data)))
+    print('yes count: {}'.format(len(yes_items)))
+    print('no count: {}'.format(len(no_items)))
+    print('number count: {}'.format(len(number_items)))
+    print('other count: {}'.format(len(other_items)))
+    
     with open(os.path.join(base_path, 'filtered_dataset.json'), 'w') as f:
         json.dump({
             'data': filtered_data,
@@ -81,4 +94,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main(4)
+    main()

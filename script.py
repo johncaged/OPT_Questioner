@@ -128,6 +128,27 @@ def main6():
         json.dump(generated_imgs, f, indent=4)
 
 
+def main7():
+    # count prob in each question category
+    from gather_filter import separate_by_category, separate_number
+    with open('./filtered_dataset.json') as f:
+        items = json.load(f)
+    yes_items, no_items, number_items, other_items = separate_by_category(items['data'])
+    common_number_items, long_tail_number_items = separate_number(number_items)
+    
+    def avg(_data):
+        return sum(map(lambda item: item['prob'], _data)) / len(_data)
+
+    def minimum(_data):
+        return min(map(lambda item: item['prob'], _data))
+    
+    print('yes prob - avg: {} - min: {} '.format(avg(yes_items), minimum(yes_items)))
+    print('no prob - avg: {} - min: {} '.format(avg(no_items), minimum(no_items)))
+    print('common number prob - avg: {} - min: {} '.format(avg(common_number_items), minimum(common_number_items)))
+    print('long tail number prob - avg: {} - min: {} '.format(avg(long_tail_number_items), minimum(long_tail_number_items)))
+    print('other prob - avg: {} - min: {} '.format(avg(other_items), minimum(other_items)))
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -139,4 +160,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main6()
+    main7()

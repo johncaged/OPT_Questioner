@@ -87,7 +87,7 @@ def main3(base_path='./'):
     yes_items, no_items, number_items, other_items = separate_by_category(data)
     
     discard_rate = (len(yes_items) - len(no_items)) / len(yes_items)
-    yes_items = list(filter(lambda: random.random() > discard_rate, yes_items))
+    yes_items = list(filter(lambda _ : random.random() > discard_rate, yes_items))
     
     filtered_data = yes_items + no_items + number_items + other_items
     data_img, _ = create_index(filtered_data)

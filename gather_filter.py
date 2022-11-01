@@ -47,16 +47,17 @@ def main(base_path='./'):
         count_and_save(filtered_data, base_path)
 
 
-def main2(batch_size=256, base_path='./'):
+def main2(batch_size=64, base_path='./'):
     data = gather_data(base_path)
     
     data_img, _ = create_index(data)
     print('generated imgs: {}'.format(len(data_img)))
     
-    yes_pick_count = int(4 * batch_size * 0.75 / 4)
-    no_pick_count = int(4 * batch_size * 0.75 / 4)
-    number_pick_count = int(4 * batch_size * 0.5 / 4)
-    other_pick_count = int(4 * batch_size * 2 / 4)
+    yes_pick_count = int(6 * batch_size * 1 / 8)
+    no_pick_count = int(6 * batch_size * 1 / 8)
+    common_number_pick_count = int(6 * batch_size * 1 / 8)
+    long_tail_number_pick_count = int(6 * batch_size * 1 / 8)
+    other_pick_count = int(6 * batch_size * 4 / 8)
     
     filtered_data = []
     batch_data = []
@@ -65,13 +66,15 @@ def main2(batch_size=256, base_path='./'):
         batch_data.extend(items)
         if (i + 1) % batch_size == 0 or (i + 1) == len(data_img):
             yes_items, no_items, number_items, other_items = separate_by_category(batch_data)
+            common_number_items, long_tail_number_items = separate_number(number_items)
             
             yes_items = sort_answer(yes_items)[0:yes_pick_count]
             no_items = sort_answer(no_items)[0:no_pick_count]
-            number_items = sort_answer(number_items)[0:number_pick_count]
+            common_number_items = sort_answer(common_number_items)[0:common_number_pick_count]
+            long_tail_number_items = sort_answer(long_tail_number_items)[0:long_tail_number_pick_count]
             other_items = sort_answer(other_items)[0:other_pick_count]
             
-            filtered_data.extend(yes_items + no_items + number_items + other_items)
+            filtered_data.extend(yes_items + no_items + common_number_items + long_tail_number_items + other_items)
             batch_data.clear()
     
     data_img, _ = create_index(filtered_data)
@@ -127,18 +130,26 @@ def sort_answer(data):
 def separate_by_category(data):
     yes_items = list(filter(lambda item: item['type'] == 'yes/no' and item['answer'] == 'yes', data))
     no_items = list(filter(lambda item: item['type'] == 'yes/no' and item['answer'] == 'no', data))
-    number_items = list(filter(lambda item: item['type'] == 'number', data))
-    other_items = list(filter(lambda item: item['type'] == 'other', data))
+    number_items = list(filter(lambda item: item['type'] == 'number' and item['answer'].isdigit(), data))
+    other_items = list(filter(lambda item: item['type'] == 'other' and item['answer'] not in ['yes', 'no'], data))
     return yes_items, no_items, number_items, other_items
+
+
+def separate_number(data):
+    common_number_items = list(filter(lambda item: item['type'] == 'number' and item['answer'].isdigit() and item['answer'] in ['0', '1', '2'], data))
+    long_tail_number_items = list(filter(lambda item: item['type'] == 'number' and item['answer'].isdigit() and item['answer'] not in ['0', '1', '2'], data))
+    return common_number_items, long_tail_number_items
 
 
 def count_and_save(data, base_path):
     yes_items, no_items, number_items, other_items = separate_by_category(data)
+    common_number_items, long_tail_number_items = separate_number(number_items)
 
     print('filtered length: {}'.format(len(data)))
     print('yes count: {}'.format(len(yes_items)))
     print('no count: {}'.format(len(no_items)))
-    print('number count: {}'.format(len(number_items)))
+    print('common number count: {}'.format(len(common_number_items)))
+    print('long tail number count: {}'.format(len(long_tail_number_items)))
     print('other count: {}'.format(len(other_items)))
     
     with open(os.path.join(base_path, 'filtered_dataset.json'), 'w') as f:

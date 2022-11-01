@@ -82,6 +82,19 @@ def main2(batch_size=64, base_path='./'):
     count_and_save(filtered_data, base_path)
 
 
+def main3(base_path='./'):
+    data = gather_data(base_path)
+    yes_items, no_items, number_items, other_items = separate_by_category(data)
+    
+    discard_rate = (len(yes_items) - len(no_items)) / len(yes_items)
+    yes_items = list(filter(lambda: random.random() > discard_rate, yes_items))
+    
+    filtered_data = yes_items + no_items + number_items + other_items
+    data_img, _ = create_index(filtered_data)
+    print('remaining imgs after filter: {}'.format(len(data_img)))
+    count_and_save(filtered_data, base_path)
+
+
 def create_index(data):
     print('creating index...')
     data_img = {}

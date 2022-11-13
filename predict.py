@@ -1,5 +1,5 @@
 from model.model import BaseQuestioner, ModelWrapper, QuestionerWithAnswer, QuestionerWithCaption, TextSampler, TopKSampler, BeamSampler, TwoStageSampler
-from data.dataset import Tokenizer, build_dataset, CaptionProcessor, build_cc3m_dataset, CC3MDataset, build_dataloader
+from data.dataset import Tokenizer, build_coco_dataset, CaptionProcessor, build_cc3m_dataset, CC3MDataset, build_dataloader
 from torch.utils.data import DataLoader
 from utils import ToCuda, QuestionIdGen
 import torch

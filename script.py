@@ -149,6 +149,31 @@ def main7():
     print('other prob - avg: {} - min: {} '.format(avg(other_items), minimum(other_items)))
 
 
+def main8():
+    # count and categorize question types.
+    with open('./dataset/VG/txt_mapper.json') as f:
+        dataset = json.load(f)
+
+
+def main9():
+    # random split train and val dataset in VG
+    with open('./dataset/VG/ids.json') as f:
+        ids = json.load(f)
+    
+    random.shuffle(ids)
+    val_size = 2000
+    val_id = ids[0:val_size]
+    train_id = ids[val_size:]
+    
+    with open('./custom_dataset/VG/train_id.json', 'w') as f:
+        json.dump(train_id, f, indent=4)
+    
+    with open('./custom_dataset/VG/val_id.json', 'w') as f:
+        json.dump(val_id, f, indent=4)
+    print('train length: {}'.format(len(train_id)))
+    print('val length: {}'.format(len(val_id)))
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -160,4 +185,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main7()
+    main9()

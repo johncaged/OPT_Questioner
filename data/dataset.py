@@ -97,6 +97,9 @@ class ValImageProcessor(ImageProcessor):
                                    Normalize(self.mean, self.std)])
 
 
+'''
+------------------------------------------The COCO Dataset.------------------------------------------
+'''
 class TextProcessor:
     
     def __init__(
@@ -330,7 +333,7 @@ class VQADataset(Dataset):
         return len(self.ids)
 
 
-def build_dataset(
+def build_coco_dataset(
     dataset_type: str,
     mode: str,
     tokenizer: Tokenizer,
@@ -357,23 +360,6 @@ def build_dataset(
     return VQADataset(img_processor_dict[mode](), text_processor, items['image'], items['image_prefix'], items['id_path'])
 
 
-class CustomDistributedSampler(DistributedSampler):
-
-    def __iter__(self):
-        if self.shuffle:
-            # deterministically shuffle based on epoch and seed
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()
-        else:
-            indices = list(range(len(self.dataset)))
-
-        if self.drop_last:
-            indices = indices[:self.total_size]
-        indices = indices[self.rank:len(indices):self.num_replicas]
-        return iter(indices)
-
-
 class CLIPText(nn.Module):
     
     def __init__(self, text_encoder):
@@ -397,6 +383,9 @@ class CLIPText(nn.Module):
         return CLIP.encode_text(self, txt_tokens, casual=casual)
 
 
+'''
+------------------------------------------The CC3M Dataset.------------------------------------------
+'''
 class CaptionProcessor:
     
     def __init__(self, caption_path: str, tokenizer: Tokenizer, mode: str = 'once'):
@@ -447,6 +436,7 @@ class CC3MDataset(Dataset):
         text_processor: CaptionProcessor,
         config_path=default_config_path
     ):
+        super().__init__(self)
         config = parse_yaml(config_path)
         self.img_names = []
         with open(config['cc3m']['train_meta_path']) as f:
@@ -496,6 +486,46 @@ def build_cc3m_dataset(
     image_processor = ValImageProcessor()
     text_processor = CaptionProcessor(config['cc3m']['txt_mapper_path'], tokenizer, text_mode)
     return CC3MDataset(tokenizer, image_processor, text_processor, config_path)
+
+
+'''
+------------------------------------------The VG Dataset.------------------------------------------
+'''
+class LocationEmbedding:
+    
+    def __init__(self):
+        pass
+
+
+class VGTextProcessor:
+    
+    def __init__(self):
+        pass
+
+
+class VGDataset(Dataset):
+    
+    def __init__(self):
+        super().__init__()
+    
+    
+
+
+class CustomDistributedSampler(DistributedSampler):
+
+    def __iter__(self):
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))
+
+        if self.drop_last:
+            indices = indices[:self.total_size]
+        indices = indices[self.rank:len(indices):self.num_replicas]
+        return iter(indices)
 
 
 def build_dataloader(dataset: Dataset, batch_size, shuffle: bool = True, collate_fn=None):

@@ -2,7 +2,7 @@ from torch_lib import Proxy
 from model.model import QuestionerGenerator, ModelWrapper
 from torch_lib import Proxy
 from utils import ToCuda
-from data.dataset import build_dataset, Tokenizer
+from data.dataset import build_coco_dataset, Tokenizer
 from torch.utils.data import DataLoader
 from utils.metrics import MyMetric
 import torch
@@ -20,7 +20,7 @@ def main():
     model.eval()
     del checkpoint
     model: QuestionerGenerator = ToCuda(model.module)
-    val_dataset = DataLoader(build_dataset('answer', 'val', tokenizer, True, 'once'), batch_size=10, shuffle=True)
+    val_dataset = DataLoader(build_coco_dataset('answer', 'val', tokenizer, True, 'once'), batch_size=10, shuffle=True)
     proxy = Proxy(model)
     proxy.build(
         # loss=Loss(),

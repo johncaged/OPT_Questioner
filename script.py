@@ -151,14 +151,37 @@ def main7():
 
 def main8():
     # count and categorize question types.
-    with open('./dataset/VG/txt_mapper.json') as f:
+    with open('./dataset/VG/question_answers.json') as f:
         dataset = json.load(f)
+    statistics = {}
+    tokenizer = Tokenizer().tokenizer
+    
+    import tqdm
+    for data in tqdm.tqdm(dataset):
+        for qa in data['qas']:
+            words = tokenizer.tokenize(qa['question'])
+            item = statistics
+            # only count the first 4 words
+            for word in words[0:4]:
+                item = item.setdefault(word, {
+                    'count': 0,
+                    'successor': {}
+                })
+                item['count'] += 1
+                item = item['successor']
+    
+    with open('./custom_dataset/VG/statistics.json', 'w') as f:
+        json.dump(statistics, f, indent=4)
 
 
 def main9():
     # random split train and val dataset in VG
-    with open('./dataset/VG/ids.json') as f:
-        ids = json.load(f)
+    with open('./dataset/VG/question_answers.json') as f:
+        dataset = json.load(f)
+    
+    ids = []
+    for data in dataset:
+        ids.append(str(data['id']))
     
     random.shuffle(ids)
     val_size = 2000
@@ -174,6 +197,28 @@ def main9():
     print('val length: {}'.format(len(val_id)))
 
 
+def main10():
+    # show question type statistics
+    with open('./custom_dataset/VG/statistics.json') as f:
+        statistics = json.load(f)
+    
+    # the first level
+    print('types of the first level: {}'.format(len(statistics)))
+    count = {}
+    for key, value in statistics.items():
+        count[key] = value['count']
+    print(count)
+    
+    # the second level
+    for key, value in statistics.items():
+        print('level2: {} count'.format(key))
+        count = {}
+        for _key, _value in value['successor'].items():
+            count[_key] = _value['count']
+        print(len(count))
+        print(sorted(count.items(), key=lambda item: item[1], reverse=True)[0:10])
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -185,4 +230,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main9()
+    main10()

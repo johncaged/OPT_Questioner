@@ -60,6 +60,15 @@ class Tokenizer:
         output[:len(tokens)] = tokens
         return output
 
+    def concat_tokens(self, tokens, sep):
+        tokens = [self.tokenize_without_padding(token) for token in tokens]
+        result = []
+        for token in tokens:
+            result.extend(token)
+            result.append(sep)
+        result.pop(-1)
+        return result
+
 
 class ImageProcessor:
     
@@ -237,23 +246,14 @@ class QuestionCaptionProcessor(TextProcessor):
                 answer_type = 'zero'
             # similar_token = 'similar' if similar else 'different'
             
-            # tip = self.concat_tokens([answer_type, similar_token, img_caption], self.tokenizer.task_prompt_sep_token)
-            tip = self.concat_tokens([answer_type, img_caption], self.tokenizer.task_prompt_sep_token)
+            # tip = self.tokenizer.concat_tokens([answer_type, similar_token, img_caption], self.tokenizer.task_prompt_sep_token)
+            tip = self.tokenizer.concat_tokens([answer_type, img_caption], self.tokenizer.task_prompt_sep_token)
             tip = self.tokenizer.get_padded_tokens(tip).unsqueeze(0)
-            target = self.concat_tokens([question, answer], self.tokenizer.question_answer_sep_token)
+            target = self.tokenizer.concat_tokens([question, answer], self.tokenizer.question_answer_sep_token)
             target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
             targets.append(target)
             tips.append(tip)
         return targets, tips
-    
-    def concat_tokens(self, tokens, sep):
-        tokens = [self.tokenizer.tokenize_without_padding(token) for token in tokens]
-        result = []
-        for token in tokens:
-            result.extend(token)
-            result.append(sep)
-        result.pop(-1)
-        return result
     
     # def choose(self, questions, caption):
     #     caption_token = tokenize(caption)
@@ -493,24 +493,162 @@ def build_cc3m_dataset(
 '''
 class LocationEmbedding:
     
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        start_from: int = 100
+    ):
+        # TODO: record unused location
+        self.start_from = start_from
+
+    def __call__(self, resolution, img_size, region):
+        # embed location
+        if region is None:
+            # full image
+            x1, y1, x2, y2 = 0, 0, resolution - 1, resolution - 1
+        else:
+            # image region
+            x1 = round(region[0] * resolution / img_size[0])
+            y1 = round(region[1] * resolution / img_size[1])
+            x2 = round(region[2] * resolution / img_size[0])
+            y2 = round(region[3] * resolution / img_size[1])
+        return self.get_location_tokens(x1, y1, x2, y2)
+
+    def get_location_tokens(self, *values):
+        return ['[unused{}]'.format(value + self.start_from) for value in values]
 
 
 class VGTextProcessor:
     
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        question_answer_path: str,
+        tokenizer: Tokenizer
+    ):
+        self.tokenizer = tokenizer
+        with open(question_answer_path) as f:
+            self.txt_mapper = json.load(f)
+        self.question_types = set(['what', 'how', 'where', 'who', 'why', 'when'])
+
+    def process(self, img_id):
+        # read qa
+        qas = self.txt_mapper[str(img_id)]
+        qa = random.choice(qas)
+        question_type = self.get_question_type(qa['question'])
+        target = self.tokenizer.concat_tokens([self.clean(qa['question']), self.clean(qa['answer'])], self.tokenizer.question_answer_sep_token)
+        target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
+        return target, question_type, qa['qa_id']
+
+    def get_question_type(self, question):
+        first_word = self.clean(self.tokenizer.tokenizer.tokenize(question)[0])
+        return first_word if first_word in self.question_types else 'other'
+
+    def clean(self, text: str):
+        return text.replace('.', '').lower()
+
+
+class QuestionRegionMapper:
+    
+    def __init__(
+        self,
+        mapper_path: str,
+        general_caption_path: str,
+        region_path: str
+    ):
+        with open(mapper_path) as f:
+            self.qr_mapper = json.load(f)
+        
+        with open(region_path) as f:
+            self.region_mapper = json.load(f)
+        
+        with open(general_caption_path) as f:
+            self.general_caption = json.load(f)
+    
+    def __call__(self, img_id, qa_id):
+        # map region to question(s)
+        if qa_id in self.qr_mapper:
+            r_id = self.qr_mapper(qa_id)
+            region = self.region_mapper[str(r_id)]
+            # caption, (x1, y1, x2, y2)
+            return region['phrase'], (region['x'], region['y'], region['x'] + region['width'], region['y'] + region['height'])
+        else:
+            return self.general_caption[img_id], None
 
 
 class VGDataset(Dataset):
     
-    def __init__(self):
+    def __init__(
+        self,
+        text_processor: VGTextProcessor,
+        image_processor: ImageProcessor,
+        location_embedding: LocationEmbedding,
+        question_region_mapper: QuestionRegionMapper,
+        tokenizer: Tokenizer,
+        image_path: str,
+        id_path: str,
+        config_path=default_config_path
+    ):
         super().__init__()
+        config = parse_yaml(config_path)
+        self.resolution = config['video_resolution']
+        self.text_processor = text_processor
+        self.image_processor = image_processor
+        self.location_embedding = location_embedding
+        self.question_region_mapper = question_region_mapper
+        self.image_path = image_path
+        self.tokenizer = tokenizer
+        # read image id
+        with open(id_path) as f:
+            self.ids = json.load(f)
     
+    def __getitem__(self, index):
+        img_id = self.ids[index]
+        # read image
+        img_path = os.path.join(self.img_path, '{}.jpg'.format(img_id))
+        img = Image.open(img_path)
+        # get image size: W, H
+        img_size = img.size[0], img.size[1]
+        img = self.image_processor.process(img).unsqueeze(0)
+        # read text data
+        target, question_type, qa_id = self.text_processor.process(img_id)
+        # get region data
+        caption, region = self.question_region_mapper(img_id, qa_id)
+        # embed location
+        location = self.location_embedding(self.resolution, img_size, region)
+        # get tip tokens
+        tip = self.tokenizer.concat_tokens([question_type, *location, caption], self.tokenizer.task_prompt_sep_token)
+        tip = self.tokenizer.get_padded_tokens(tip).unsqueeze(0)
+        return {'imgs': img, 'tips': tip, 'targets': target}, target, [str(img_id)] * tip.size()[0]
     
+    def __len__(self):
+        return len(self.ids)
 
 
+def build_vg_dataset(
+    mode: str,
+    tokenizer: Tokenizer,
+    config_path=default_config_path
+):
+    img_processor_dict = {
+        'train': TrainImageProcessor,
+        'val': ValImageProcessor
+    }
+    config = parse_yaml(default_config_path)
+    # mode: train / val
+    items = config[mode]
+    return VGDataset(
+        VGTextProcessor(items['question_answer_path'], tokenizer),
+        img_processor_dict[mode](),
+        LocationEmbedding(),
+        QuestionRegionMapper(items['mapper_path'], items['general_caption_path'], items['region_path']),
+        tokenizer,
+        items['img_path'],
+        items['id_path']
+    )
+
+
+'''
+------------------------------------------Some utils for building a dataset.------------------------------------------
+'''
 class CustomDistributedSampler(DistributedSampler):
 
     def __iter__(self):

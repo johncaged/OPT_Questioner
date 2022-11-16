@@ -181,7 +181,8 @@ def main9():
     
     ids = []
     for data in dataset:
-        ids.append(str(data['id']))
+        if len(data['qas']) > 0:
+            ids.append(str(data['id']))
     
     random.shuffle(ids)
     val_size = 2000
@@ -217,6 +218,34 @@ def main10():
             count[_key] = _value['count']
         print(len(count))
         print(sorted(count.items(), key=lambda item: item[1], reverse=True)[0:10])
+
+
+def main11():
+    # check dataset bug
+    # from data.dataset import build_vg_dataset, ImageProcessor
+    # dataset = build_vg_dataset('train', Tokenizer())
+    # print(dataset[4502])
+    
+    # import os
+    # from PIL import Image
+    # from torchvision.transforms import *
+    # img_path = os.path.join('./dataset/VG/VG_100K', '{}.jpg'.format(2413180))
+    # img = Image.open(img_path)
+    # # get image size: W, H
+    # # img_size = img.size[0], img.size[1]
+    # # print(img_size)
+    # img = img.convert('RGB')
+    # img = ToTensor()(img)
+    # print(img.size())
+    # img = Resize((224, 224))(img)
+    # # print(img.size())
+    # import numpy as np
+    # Image.fromarray(np.uint8(img.squeeze(0).permute(1, 2, 0) * 255)).save('./test.jpg')
+
+    import cv2
+    image = cv2.imread('./test.jpg')
+    cv2.rectangle(image, (0, 90), (79, 143), (0, 0, 255), 2)  
+    cv2.imwrite('./test2.jpg', image)
 
 
 def create_index(data):

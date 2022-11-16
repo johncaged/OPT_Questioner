@@ -1,7 +1,7 @@
 from torch_lib import Proxy
 from model.model import BaseQuestioner, QuestionerWithCaption
 import os
-from data.dataset import Tokenizer, build_dataloader, build_coco_dataset
+from data.dataset import Tokenizer, build_dataloader, build_coco_dataset, build_vg_dataset
 from utils.loss import Loss, MixLoss
 from utils import ToCuda, parse_yaml, default_config_path
 from torch.optim import Adam
@@ -105,11 +105,15 @@ def main():
     # del checkpoint
     # build dataset
     # train_dataset = NOTHING
-    train_data = build_coco_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip)
-    train2_data = build_coco_dataset('caption', 'train2', tokenizer, text_encoder=model.module.clip)
-    train_dataset, train_sampler = build_dataloader(train_data + train2_data, 512)
-    del train_data, train2_data
-    val_dataset, _ = build_dataloader(build_coco_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
+    
+    # train_data = build_coco_dataset('caption', 'train', tokenizer, text_encoder=model.module.clip)
+    # train2_data = build_coco_dataset('caption', 'train2', tokenizer, text_encoder=model.module.clip)
+    # train_dataset, train_sampler = build_dataloader(train_data + train2_data, 512)
+    # del train_data, train2_data
+    # val_dataset, _ = build_dataloader(build_coco_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
+    
+    train_dataset, train_sampler = build_dataloader(build_vg_dataset('train', tokenizer), 512)
+    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer), 512)
     # torch-lib pipeline
     proxy = Proxy(model)
     proxy.custom.train_sampler = train_sampler

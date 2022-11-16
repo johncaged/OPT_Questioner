@@ -17,6 +17,7 @@ import torch.nn as nn
 import copy
 from model.clip import CLIP
 import collections
+import re
 
 
 class Tokenizer:
@@ -61,9 +62,20 @@ class Tokenizer:
         return output
 
     def concat_tokens(self, tokens, sep):
-        tokens = [self.tokenize_without_padding(token) for token in tokens]
-        result = []
+        def encode(_item):
+            return self.tokenize_without_padding(_item) if re.fullmatch('\[unused.*\]', _item) is None else self.tokenizer.convert_tokens_to_ids([_item])
+        
+        _tokens = []
         for token in tokens:
+            if isinstance(token, (list, tuple)):
+                temp = []
+                for t in token:
+                    temp.extend(encode(t))
+            else:
+                temp = encode(token)
+            _tokens.append(temp)
+        result = []
+        for token in _tokens:
             result.extend(token)
             result.append(sep)
         result.pop(-1)
@@ -507,10 +519,10 @@ class LocationEmbedding:
             x1, y1, x2, y2 = 0, 0, resolution - 1, resolution - 1
         else:
             # image region
-            x1 = round(region[0] * resolution / img_size[0])
-            y1 = round(region[1] * resolution / img_size[1])
-            x2 = round(region[2] * resolution / img_size[0])
-            y2 = round(region[3] * resolution / img_size[1])
+            x1 = min(round(region[0] * resolution / img_size[0]), resolution - 1)
+            y1 = min(round(region[1] * resolution / img_size[1]), resolution - 1)
+            x2 = min(round(region[2] * resolution / img_size[0]), resolution - 1)
+            y2 = min(round(region[3] * resolution / img_size[1]), resolution - 1)
         return self.get_location_tokens(x1, y1, x2, y2)
 
     def get_location_tokens(self, *values):
@@ -564,10 +576,10 @@ class QuestionRegionMapper:
             self.general_caption = json.load(f)
     
     def __call__(self, img_id, qa_id):
+        qa_id = str(qa_id)
         # map region to question(s)
-        if qa_id in self.qr_mapper:
-            r_id = self.qr_mapper(qa_id)
-            region = self.region_mapper[str(r_id)]
+        if qa_id in self.qr_mapper and str(self.qr_mapper[qa_id]) in self.region_mapper:
+            region = self.region_mapper[str(self.qr_mapper[qa_id])]
             # caption, (x1, y1, x2, y2)
             return region['phrase'], (region['x'], region['y'], region['x'] + region['width'], region['y'] + region['height'])
         else:
@@ -603,7 +615,7 @@ class VGDataset(Dataset):
     def __getitem__(self, index):
         img_id = self.ids[index]
         # read image
-        img_path = os.path.join(self.img_path, '{}.jpg'.format(img_id))
+        img_path = os.path.join(self.image_path, '{}.jpg'.format(img_id))
         img = Image.open(img_path)
         # get image size: W, H
         img_size = img.size[0], img.size[1]
@@ -615,7 +627,7 @@ class VGDataset(Dataset):
         # embed location
         location = self.location_embedding(self.resolution, img_size, region)
         # get tip tokens
-        tip = self.tokenizer.concat_tokens([question_type, *location, caption], self.tokenizer.task_prompt_sep_token)
+        tip = self.tokenizer.concat_tokens([question_type, location, caption], self.tokenizer.task_prompt_sep_token)
         tip = self.tokenizer.get_padded_tokens(tip).unsqueeze(0)
         return {'imgs': img, 'tips': tip, 'targets': target}, target, [str(img_id)] * tip.size()[0]
     

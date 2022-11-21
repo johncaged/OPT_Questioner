@@ -5,6 +5,7 @@ from data.dataset import Tokenizer, build_dataloader, build_coco_dataset, build_
 from utils.loss import Loss, MixLoss
 from utils import ToCuda, parse_yaml, default_config_path
 from torch.optim import Adam
+from utils.metrics import MultiTaskMetric
 import torch.distributed as dist
 from apex.parallel import DistributedDataParallel as DDP
 # from torch.nn.parallel import DistributedDataParallel as DDP
@@ -124,7 +125,8 @@ def main():
     proxy.build(
         loss=Loss(label_smoothing=0.0),
         optimizer=optimizer,
-        lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: (1 - epoch / total_epoch) ** 0.9)
+        lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: (1 - epoch / total_epoch) ** 0.9),
+        metrics=MultiTaskMetric()
     )
     proxy.train(
         train_dataset,

@@ -18,8 +18,6 @@ class CustomLossHandler(LossHandler):
     
     def handle(self, ctx):
         super().handle(ctx)
-        if is_nothing(ctx.custom.loss):
-            ctx.custom.loss = []
         ctx.custom.loss.append(float(ctx.step.loss.clone().cpu().detach()))
         ctx.step.loss = ctx.step.loss / 3
 
@@ -54,7 +52,7 @@ class SetModelHandler(Handler):
 
 
 def set_handler(proxy):
-    proxy.custom.loss = -1
+    proxy.custom.loss = []
     proxy.handler.Loss = CustomLossHandler
     proxy.handler.Backward = AMPBackward
     proxy.build_train()

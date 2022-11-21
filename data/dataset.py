@@ -660,8 +660,6 @@ class VGDataset(Dataset):
         caption_tip = self.tokenizer.concat_tokens([caption_task_location], self.tokenizer.task_prompt_sep_token)
         caption_tip = self.tokenizer.get_padded_tokens(caption_tip).unsqueeze(0)
         caption_target = self.tokenizer.tokenize(caption_task_region_caption).unsqueeze(0)
-        print(caption_tip, caption_tip.size())
-        print(caption_target, caption_target.size())
         return {
             'imgs': img,
             'tips': tip,

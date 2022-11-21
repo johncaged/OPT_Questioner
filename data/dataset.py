@@ -586,6 +586,21 @@ class QuestionRegionMapper:
             return self.general_caption[img_id], None
 
 
+class CaptionTask:
+    
+    def __init__(
+        self,
+        image_region_mapper_path: str
+    ) -> None:
+        with open(image_region_mapper_path) as f:
+            self.image_region_mapper = json.load(f)
+
+    def __call__(self, img_id):
+        regions = self.image_region_mapper[str(img_id)]
+        region = random.choice(regions)
+        return region
+
+
 class VGDataset(Dataset):
     
     def __init__(
@@ -595,6 +610,7 @@ class VGDataset(Dataset):
         location_embedding: LocationEmbedding,
         question_region_mapper: QuestionRegionMapper,
         tokenizer: Tokenizer,
+        caption_task: CaptionTask,
         image_path: str,
         id_path: str,
         config_path=default_config_path
@@ -606,6 +622,7 @@ class VGDataset(Dataset):
         self.image_processor = image_processor
         self.location_embedding = location_embedding
         self.question_region_mapper = question_region_mapper
+        self.caption_task = caption_task
         self.image_path = image_path
         self.tokenizer = tokenizer
         # read image id
@@ -629,7 +646,29 @@ class VGDataset(Dataset):
         # get tip tokens
         tip = self.tokenizer.concat_tokens([question_type, location, caption], self.tokenizer.task_prompt_sep_token)
         tip = self.tokenizer.get_padded_tokens(tip).unsqueeze(0)
-        return {'imgs': img, 'tips': tip, 'targets': target}, target, [str(img_id)] * tip.size()[0]
+        
+        # get caption tip and target
+        caption_task_region = self.caption_task(img_id)
+        caption_task_region_caption = caption_task_region['phrase']
+        caption_task_region_area = (
+            caption_task_region['x'],
+            caption_task_region['y'],
+            caption_task_region['x'] + caption_task_region['width'],
+            caption_task_region['y'] + caption_task_region['height']
+        )
+        caption_task_location = self.location_embedding(self.resolution, img_size, caption_task_region_area)
+        caption_tip = self.tokenizer.concat_tokens([caption_task_location], self.tokenizer.task_prompt_sep_token)
+        caption_tip = self.tokenizer.get_padded_tokens(caption_tip).unsqueeze(0)
+        caption_target = self.tokenizer.tokenize(caption_task_region_caption).unsqueeze(0)
+        print(caption_tip, caption_tip.size())
+        print(caption_target, caption_target.size())
+        return {
+            'imgs': img,
+            'tips': tip,
+            'targets': target,
+            'caption_tips': caption_tip,
+            'caption_targets': caption_target
+        }, target, [str(img_id)] * tip.size()[0]
     
     def __len__(self):
         return len(self.ids)

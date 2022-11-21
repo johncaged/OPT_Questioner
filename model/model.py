@@ -146,7 +146,7 @@ class BaseQuestioner(QuestionerModule):
         self.tokenizer = tokenizer
         self.questioner_adapter = questioner_adapter
         self.auto_regressive = auto_regressive
-        self._forward_answer = False
+        self._forward = None
     
     def get_task_prompt(self, content, batch_size):
         torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
@@ -172,12 +172,12 @@ class BaseQuestioner(QuestionerModule):
 
     def forward(self, batch):
         batch = reshape_tensor(batch)
-        img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips']), ToCuda(batch['targets'])
+        img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips' if self._forward != 'caption' else 'caption_tips']) , ToCuda(batch['targets' if self._forward != 'caption' else 'caption_targets'])
 
         if self.auto_regressive is False:
             # random mask the target.
-            target, labels = self.masker(target, 0.6, answer_mask=self._forward_answer)
-            if self._forward_answer is True:
+            target, labels = self.masker(target, 0.6, answer_mask=self._forward == 'answer')
+            if self._forward == 'answer':
                 tip[:, 1] = self.tokenizer.answer_type_mask_token
             output_txt = self.video_language_process(img, tip, target)
             output_txt = output_txt[labels != -1]
@@ -198,7 +198,7 @@ class BaseQuestioner(QuestionerModule):
         video_input = self.get_video_multimodal_embedding(video_input)
         # get task prompt
         batch_size = tip.shape[0]
-        task_prompt = self.get_task_prompt(self.questioner_adapter.get_task(), batch_size)
+        task_prompt = self.get_task_prompt(self.questioner_adapter.get_task(self._forward), batch_size)
         task_prompt = torch.cat((tip[:, 0:1], task_prompt, tip[:, 1:]), dim=1)
         # forward multimodal
         original_output = self.bert(target, task_prompt, video_input, None, casual=True)
@@ -236,6 +236,15 @@ class QuestionerWithCaption:
     
     def get_task(self):
         return 'question generation with visual and caption cues'
+
+
+class VGAdapter:
+    
+    def get_task(self, _forward):
+        if _forward == 'caption':
+            return 'generate region caption'
+        else:
+            return 'generate question answer pair'
 
 
 class PredictionHead(nn.Module):

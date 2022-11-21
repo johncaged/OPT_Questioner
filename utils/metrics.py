@@ -48,3 +48,9 @@ class MyMetric(Metric):
             self.predictions = {}
             result['CIDEr'] = score_c
         return result
+
+
+class MultiTaskMetric(Metric):
+    
+    def get(self, ctx):
+        return ctx.custom.metrics

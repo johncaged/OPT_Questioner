@@ -727,7 +727,9 @@ def reshape_tensor(batch):
     items = [
         {'item': 'imgs', 'length': 5},
         {'item': 'tips', 'length': 2},
-        {'item': 'targets', 'length': 2}
+        {'item': 'targets', 'length': 2},
+        {'item': 'caption_targets', 'length': 2},
+        {'item': 'caption_tips', 'length': 2}
     ]
     
     for item in items:

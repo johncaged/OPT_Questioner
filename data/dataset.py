@@ -705,7 +705,7 @@ def build_vg_dataset(
         LocationEmbedding(),
         QuestionRegionMapper(items['mapper_path'], items['general_caption_path'], items['region_path']),
         tokenizer,
-        CaptionTask(items['image_region_mapper_path']),
+        CaptionTask(items['image_region_mapper_path'], items['general_caption_path']),
         items['img_path'],
         items['id_path']
     )

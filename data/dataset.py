@@ -590,14 +590,29 @@ class CaptionTask:
     
     def __init__(
         self,
-        image_region_mapper_path: str
+        image_region_mapper_path: str,
+        general_caption_path: str
     ) -> None:
         with open(image_region_mapper_path) as f:
             self.image_region_mapper = json.load(f)
 
+        with open(general_caption_path) as f:
+            self.general_caption = json.load(f)
+
     def __call__(self, img_id):
         regions = self.image_region_mapper[str(img_id)]
+        general = {
+            'general': True,
+            'phrase': self.general_caption[str(img_id)],
+            'x': 0,
+            'y': 0,
+            'width': 0,
+            'height': 0
+        }
+        regions.append(general)
         region = random.choice(regions)
+        if region['x'] < 0 or region['y'] < 0 or region['width'] < 0 or region['height'] < 0:
+            region = general
         return region
 
 
@@ -655,7 +670,7 @@ class VGDataset(Dataset):
             caption_task_region['y'],
             caption_task_region['x'] + caption_task_region['width'],
             caption_task_region['y'] + caption_task_region['height']
-        )
+        ) if 'general' not in caption_task_region else None
         caption_task_location = self.location_embedding(self.resolution, img_size, caption_task_region_area)
         caption_tip = self.tokenizer.concat_tokens([caption_task_location], self.tokenizer.task_prompt_sep_token)
         caption_tip = self.tokenizer.get_padded_tokens(caption_tip).unsqueeze(0)

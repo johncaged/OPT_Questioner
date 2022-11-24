@@ -448,7 +448,7 @@ class CC3MDataset(Dataset):
         text_processor: CaptionProcessor,
         config_path=default_config_path
     ):
-        super().__init__(self)
+        super().__init__()
         config = parse_yaml(config_path)
         self.img_names = []
         with open(config['cc3m']['train_meta_path']) as f:

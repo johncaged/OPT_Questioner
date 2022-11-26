@@ -158,11 +158,11 @@ class BaseQuestioner(QuestionerModule):
         b, n, _, h, w = video.shape
         video_output = self.clip.encode_image(video.reshape(b * n, 3, h, w))
         video_output = video_output.reshape(b, -1, *video_output.shape[-2:])
-        return video_output
+        return self.get_video_multimodal_embedding(video_output)
 
     def get_video_multimodal_embedding(self, video):
         b, n, x, c = video.shape
-       
+
         if hasattr(self, 'video_feature_adapter'):
             video = self.video_feature_adapter(video)
         video = video + self.video_frame_embedding[:, :video.shape[1], :].unsqueeze(-2)
@@ -179,23 +179,25 @@ class BaseQuestioner(QuestionerModule):
             target, labels = self.masker(target, 0.6, answer_mask=self._forward == 'answer')
             if self._forward == 'answer':
                 tip[:, 1] = self.tokenizer.answer_type_mask_token
-            output_txt = self.video_language_process(img, tip, target)
+            video_input = self.forward_video(img)
+            output_txt = self.video_language_process(video_input, tip, target)
             output_txt = output_txt[labels != -1]
             prediction_scores = self.cls_head(output_txt)
             del output_txt, img, tip, target
             return prediction_scores, labels[labels != -1]
             
         else:
-            output_txt = self.video_language_process(img, tip, target)
+            # using cache to optimize performance
+            if 'video_input' not in batch:
+                batch['video_input'] = self.forward_video(img)
+            video_input = batch['video_input']
+            output_txt = self.video_language_process(video_input, tip, target)
             output_txt = output_txt[:, -1]
             prediction_scores = self.cls_head(output_txt)
             del output_txt, img, tip, target
             return prediction_scores, None
 
-    def video_language_process(self, img, tip, target):
-        # get encoded and embedded img features
-        video_input = self.forward_video(img)
-        video_input = self.get_video_multimodal_embedding(video_input)
+    def video_language_process(self, video_input, tip, target):
         # get task prompt
         batch_size = tip.shape[0]
         task_prompt = self.get_task_prompt(self.questioner_adapter.get_task(self._forward), batch_size)
@@ -480,7 +482,7 @@ class TopKSampler(TextSampler):
 
         unfinished = ToCuda(torch.ones(batch_size, dtype=torch.bool))
 
-        state = None if 'questions' not in batch else batch['questions']
+        state = None
         for t in range(max_generation_len):
             logits = self.module.get_logits(batch, state)
 

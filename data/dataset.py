@@ -497,7 +497,7 @@ class CC3MDataset(Dataset):
     
     @staticmethod
     def raw_resolution_collate_fn(batch):
-        imgs = list(map(lambda item: item[0]['imgs'], batch))
+        imgs = list(map(lambda item: item[0]['imgs'].squeeze(0), batch))
         img_ids = []
         for item in zip(batch, imgs):
             img_ids.extend([item[0][1]] * item[1].size()[0])

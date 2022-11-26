@@ -118,6 +118,13 @@ class ValImageProcessor(ImageProcessor):
                                    Normalize(self.mean, self.std)])
 
 
+class RawResolutionImageProcessor(ImageProcessor):
+    
+    def __init__(self):
+        super().__init__()
+        self.transforms = Compose([Normalize(self.mean, self.std)])
+
+
 '''
 ------------------------------------------The COCO Dataset.------------------------------------------
 '''
@@ -487,15 +494,24 @@ class CC3MDataset(Dataset):
             img_ids.extend([item[0][1]] * item[1].size()[0])
         
         return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0)}, img_ids
+    
+    @staticmethod
+    def raw_resolution_collate_fn(batch):
+        imgs = list(map(lambda item: item[0]['imgs'], batch))
+        img_ids = []
+        for item in zip(batch, imgs):
+            img_ids.extend([item[0][1]] * item[1].size()[0])
+        return {'imgs': imgs}, img_ids
 
 
 def build_cc3m_dataset(
     tokenizer: Tokenizer,
     config_path=default_config_path,
-    text_mode: str = 'once'
+    text_mode: str = 'once',
+    raw_resolution: bool = False
 ):
     config = parse_yaml(config_path)
-    image_processor = ValImageProcessor()
+    image_processor = ValImageProcessor() if raw_resolution is False else RawResolutionImageProcessor()
     text_processor = CaptionProcessor(config['cc3m']['txt_mapper_path'], tokenizer, text_mode)
     return CC3MDataset(tokenizer, image_processor, text_processor, config_path)
 

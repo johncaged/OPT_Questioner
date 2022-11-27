@@ -90,7 +90,7 @@ def main():
         data_to_select = {}
         
         for k in range(object_sample):
-            objects = batch['objects']
+            objects = batch[0]['objects']
             sampled_objects = [random.choice(_objects) for _objects in objects]
             # generate region captions
             processed_sampled_objects = [process_tip(_object) for _object in sampled_objects]

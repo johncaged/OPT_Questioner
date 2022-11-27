@@ -43,6 +43,10 @@ def main():
     print('generated img size: {}'.format(len(gen_imgs)))
     
     cc3m.img_names = list(set(cc3m.img_names).difference(set(gen_imgs)))
+    
+    if args.gen_selected_imgs is True:
+        with open('selected_imgs.json') as f:
+            cc3m.img_names = json.load(f)
     print('dataset left: {}'.format(len(cc3m)))
     
     val_dataset, _ = build_dataloader(cc3m, batch_size=batch_size, collate_fn=CC3MDataset.collate_fn, shuffle=False)

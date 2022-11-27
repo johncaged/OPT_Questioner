@@ -248,6 +248,15 @@ def main11():
     cv2.imwrite('./test2.jpg', image)
 
 
+def main12():
+    # convert generated imgs
+    with open('./custom_dataset/CC3M/objects.json') as f:
+        items = json.load(f)
+    img_ids = list(items.keys())
+    selected_imgs = list(map(lambda item: '{}.jpg'.format(item), img_ids))
+    with open('./selected_imgs.json', 'w') as f:
+        json.dump(selected_imgs, f, indent=4)
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -259,4 +268,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main10()
+    main12()

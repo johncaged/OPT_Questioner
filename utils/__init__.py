@@ -32,6 +32,7 @@ def get_args():
     parser.add_argument('--master_address', type=str, default=None)
     parser.add_argument('--master_port', type=str, default=None)
     parser.add_argument('--fp16', action='store_true')
+    parser.add_argument('--gen_selected_imgs', action='store_true')
     return parser.parse_args()
 
 

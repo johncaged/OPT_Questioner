@@ -82,6 +82,9 @@ def main():
         _tip = tokenizer.concat_tokens(tip_items, tokenizer.task_prompt_sep_token)
         _tip = tokenizer.get_padded_tokens(_tip).unsqueeze(0)
         return _tip
+
+    def convert_object(_object):
+        return [_item[7:-1] for _item in _object]
     
     for i, batch in enumerate(val_dataset):
         start_time = time.time()
@@ -101,7 +104,7 @@ def main():
             captions = convert_items(detach(prediction), tokenizer)
             
             model.module._forward = 'question'
-            processed_tip = [process_tip(_object, region_caption) for _object, region_caption in zip(sampled_objects, captions)]
+            processed_tip = torch.cat([process_tip(_object, region_caption) for _object, region_caption in zip(sampled_objects, captions)], dim=0)
         
             for j in range(repeat_sample):
                 start_sample = time.time()
@@ -112,7 +115,7 @@ def main():
                 
                 prediction, probability = model(batch[0])
 
-                for answer, question, prob, img_id, _object in zip(convert_items(detach(prediction), tokenizer, start_token=tokenizer.question_answer_sep_token),
+                for answer, question, prob, img_id, _object, _caption in zip(convert_items(detach(prediction), tokenizer, start_token=tokenizer.question_answer_sep_token),
                                                             convert_items(detach(prediction), tokenizer, end_token=tokenizer.question_answer_sep_token),
                                                             # convert_items(detach(question_prediction), tokenizer),
                                                             detach(probability),
@@ -125,8 +128,8 @@ def main():
                         'answer': answer,
                         'prob': prob,
                         'type': types[j]['answer_type'],
-                        'object': _object,
-                        'region_description': captions
+                        'object': convert_object(_object),
+                        'region_description': _caption
                     }
                     
                     img_data.append(_data)

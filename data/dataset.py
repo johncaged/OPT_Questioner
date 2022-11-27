@@ -20,6 +20,7 @@ import collections
 import re
 
 
+'''------------------------------------------dataset utils.------------------------------------------'''
 class Tokenizer:
     
     def __init__(self, max_len: int = 30, config_path=default_config_path):
@@ -123,6 +124,32 @@ class RawResolutionImageProcessor(ImageProcessor):
     def __init__(self):
         super().__init__()
         self.transforms = Compose([Normalize(self.mean, self.std)])
+
+
+class LocationEmbedding:
+    
+    def __init__(
+        self,
+        start_from: int = 100
+    ):
+        # TODO: record unused location
+        self.start_from = start_from
+
+    def __call__(self, resolution, img_size, region):
+        # embed location
+        if region is None:
+            # full image
+            x1, y1, x2, y2 = 0, 0, resolution - 1, resolution - 1
+        else:
+            # image region
+            x1 = min(round(region[0] * resolution / img_size[0]), resolution - 1)
+            y1 = min(round(region[1] * resolution / img_size[1]), resolution - 1)
+            x2 = min(round(region[2] * resolution / img_size[0]), resolution - 1)
+            y2 = min(round(region[3] * resolution / img_size[1]), resolution - 1)
+        return self.get_location_tokens(x1, y1, x2, y2)
+
+    def get_location_tokens(self, *values):
+        return ['[unused{}]'.format(value + self.start_from) for value in values]
 
 
 '''
@@ -429,20 +456,16 @@ class CaptionProcessor:
             return img_captions
 
     @staticmethod
-    def attach_task_prompt(caption, answer_type, similar: bool, tokenizer: Tokenizer):
-        assert answer_type in ['yes', 'no', 'zero', 'number', 'other']
-        batch_size = caption.shape[0]
+    def attach_task_prompt(item, prompt, tokenizer: Tokenizer):
+        batch_size = item.shape[0]
         torch_convert = lambda item: torch.tensor(item).unsqueeze(0).expand(batch_size, -1).long()
         
-        answer_type_token = torch_convert(tokenizer.tokenize_without_padding(answer_type))
-        # similar_token = torch_convert(tokenizer.tokenize_without_padding('similar' if similar else 'different'))
+        prompt_token = torch_convert(tokenizer.tokenize_without_padding(prompt))
         return torch.cat([
-            caption[:, 0:1],
-            answer_type_token,
+            item[:, 0:1],
+            prompt_token,
             torch_convert([tokenizer.task_prompt_sep_token]),
-            # similar_token,
-            # torch_convert([tokenizer.task_prompt_sep_token]),
-            caption[:, 1:]
+            item[:, 1:]
         ], dim=1)
 
 
@@ -453,6 +476,7 @@ class CC3MDataset(Dataset):
         tokenizer: Tokenizer,
         image_processor: ImageProcessor,
         text_processor: CaptionProcessor,
+        location_embedding: LocationEmbedding,
         config_path=default_config_path
     ):
         super().__init__()
@@ -461,25 +485,34 @@ class CC3MDataset(Dataset):
         with open(config['cc3m']['train_meta_path']) as f:
             self.img_names = list(map(lambda item: item.strip().replace('\n', '').replace('\r', ''), f.readlines()))
         
+        with open(config['cc3m']['objects_path']) as f:
+            self.object_mapper = json.load(f)
+        
+        self.resolution = config['video_resolution']
         self.img_path = config['cc3m']['img_path']
         self.tokenizer = tokenizer
         self.image_processor = image_processor
         self.text_processor = text_processor
+        self.location_embedding = location_embedding
     
     def __getitem__(self, index):
         img_name = self.img_names[index]
         
         img_path = os.path.join(self.img_path, img_name)
         img = Image.open(img_path)
+        img_size = img.size[0], img.size[1]
         img = self.image_processor.process(img).unsqueeze(0)
         
         img_id = os.path.splitext(os.path.split(img_name)[1])[0]
         captions = self.text_processor.process(img_id)
         captions = torch.cat(captions, dim=0)
         
+        _objects = self.object_mapper[str(img_id)]
+        objects = [self.location_embedding(self.resolution, img_size, _object) for _object in _objects]
+        
         # batch, time, channel, height, width
         imgs = img.repeat(captions.size()[0], *([1] * 4))
-        return {'imgs': imgs, 'tips': captions}, str(img_id)
+        return {'imgs': imgs, 'tips': captions, 'objects': objects}, str(img_id)
     
     def __len__(self):
         return len(self.img_names)
@@ -488,12 +521,13 @@ class CC3MDataset(Dataset):
     def collate_fn(batch):
         imgs = list(map(lambda item: item[0]['imgs'], batch))
         tips = list(map(lambda item: item[0]['tips'], batch))
+        objects = list(map(lambda item: item[0]['objects'], batch))
         
         img_ids = []
         for item in zip(batch, tips):
             img_ids.extend([item[0][1]] * item[1].size()[0])
         
-        return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0)}, img_ids
+        return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0), 'objects': objects}, img_ids
     
     @staticmethod
     def raw_resolution_collate_fn(batch):
@@ -519,32 +553,6 @@ def build_cc3m_dataset(
 '''
 ------------------------------------------The VG Dataset.------------------------------------------
 '''
-class LocationEmbedding:
-    
-    def __init__(
-        self,
-        start_from: int = 100
-    ):
-        # TODO: record unused location
-        self.start_from = start_from
-
-    def __call__(self, resolution, img_size, region):
-        # embed location
-        if region is None:
-            # full image
-            x1, y1, x2, y2 = 0, 0, resolution - 1, resolution - 1
-        else:
-            # image region
-            x1 = min(round(region[0] * resolution / img_size[0]), resolution - 1)
-            y1 = min(round(region[1] * resolution / img_size[1]), resolution - 1)
-            x2 = min(round(region[2] * resolution / img_size[0]), resolution - 1)
-            y2 = min(round(region[3] * resolution / img_size[1]), resolution - 1)
-        return self.get_location_tokens(x1, y1, x2, y2)
-
-    def get_location_tokens(self, *values):
-        return ['[unused{}]'.format(value + self.start_from) for value in values]
-
-
 class VGTextProcessor:
     
     def __init__(

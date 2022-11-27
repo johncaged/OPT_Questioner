@@ -84,7 +84,7 @@ def main():
         return _tip
 
     def convert_object(_object):
-        return [_item[7:-1] for _item in _object]
+        return [int(_item[7:-1]) - 100 for _item in _object]
     
     for i, batch in enumerate(val_dataset):
         start_time = time.time()

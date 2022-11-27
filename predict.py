@@ -115,7 +115,7 @@ def main():
                 elif answer_type == 'number':
                     answer_type = 'zero' if random.random() < zero_prob else 'number'
                 
-                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, answer_type, False, tokenizer)
+                batch[0]['tips'] = CaptionProcessor.attach_task_prompt(tip, answer_type, tokenizer)
                 
                 # append_to_file('result.txt', 'Answer Type: {0}, Similar: {1}\n'.format(types[j]['answer_type'], types[j]['similar']))
                 

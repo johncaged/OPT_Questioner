@@ -215,7 +215,7 @@ class BaseQuestioner(QuestionerModule):
         txt_tokens = torch.cat((state, masked_tokens), dim=1) if state is not None else masked_tokens
         txt_tokens = torch.cat((bos_token, txt_tokens), dim=1)
         
-        batch['targets'] = txt_tokens
+        batch['targets' if self._forward != 'caption' else 'caption_targets'] = txt_tokens
         return self(batch)[0]
     
     def get_batch_size(self, batch):
@@ -240,7 +240,7 @@ class QuestionerWithCaption:
         return 'question generation with visual and caption cues'
 
 
-class VGAdapter:
+class MultiStageAdapter:
     
     def get_task(self, _forward):
         if _forward == 'caption':

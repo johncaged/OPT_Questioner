@@ -1,5 +1,5 @@
 from torch_lib import Proxy
-from model.model import BaseQuestioner, QuestionerWithCaption, VGAdapter
+from model.model import BaseQuestioner, QuestionerWithCaption, MultiStageAdapter
 import os
 from data.dataset import Tokenizer, build_dataloader, build_coco_dataset, build_vg_dataset
 from utils.loss import Loss, MixLoss
@@ -34,7 +34,7 @@ def main():
     tokenizer = Tokenizer()
     # build and load model
     # model = BaseQuestioner(tokenizer, QuestionerWithCaption())
-    model = BaseQuestioner(tokenizer, VGAdapter())
+    model = BaseQuestioner(tokenizer, MultiStageAdapter())
     model.load_pretrained_weights()
     # optimizer
     optimizer = Adam(model.parameters(), lr=1e-5)

@@ -45,7 +45,7 @@ def main():
     cc3m.img_names = list(set(cc3m.img_names).difference(set(gen_imgs)))
     print('dataset left: {}'.format(len(cc3m)))
     
-    val_dataset, _ = build_dataloader(cc3m, batch_size=batch_size, collate_fn=CC3MDataset.collate_fn)
+    val_dataset, _ = build_dataloader(cc3m, batch_size=batch_size, collate_fn=CC3MDataset.collate_fn, shuffle=False)
     print('step left: {}'.format(len(val_dataset)))
     
     detach = lambda x: x.detach().cpu().tolist()

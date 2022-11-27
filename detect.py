@@ -17,8 +17,9 @@ def main():
     os.environ['TORCH_HOME'] = './checkpoint/pretrained/'
     
     dataset, _ = build_dataloader(
-        build_cc3m_dataset(Tokenizer(), raw_resolution=True),
+        build_cc3m_dataset(Tokenizer(), raw_resolution=True, return_objects=False),
         batch_size=10,
+        shuffle=False,
         collate_fn=CC3MDataset.raw_resolution_collate_fn
     )
     model = ToCuda(fasterrcnn_resnet50_fpn(pretrained=True, trainable_backbone_layers=0)).eval()

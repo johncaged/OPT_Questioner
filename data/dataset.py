@@ -477,6 +477,7 @@ class CC3MDataset(Dataset):
         image_processor: ImageProcessor,
         text_processor: CaptionProcessor,
         location_embedding: LocationEmbedding,
+        return_objects: bool,
         config_path=default_config_path
     ):
         super().__init__()
@@ -485,9 +486,11 @@ class CC3MDataset(Dataset):
         with open(config['cc3m']['train_meta_path']) as f:
             self.img_names = list(map(lambda item: item.strip().replace('\n', '').replace('\r', ''), f.readlines()))
         
-        with open(config['cc3m']['objects_path']) as f:
-            self.object_mapper = json.load(f)
+        if return_objects is True:
+            with open(config['cc3m']['objects_path']) as f:
+                self.object_mapper = json.load(f)
         
+        self.return_objects = return_objects
         self.resolution = config['video_resolution']
         self.img_path = config['cc3m']['img_path']
         self.tokenizer = tokenizer
@@ -507,8 +510,11 @@ class CC3MDataset(Dataset):
         captions = self.text_processor.process(img_id)
         captions = torch.cat(captions, dim=0)
         
-        _objects = self.object_mapper[str(img_id)]
-        objects = [self.location_embedding(self.resolution, img_size, _object) for _object in _objects]
+        if self.return_objects is True:
+            _objects = self.object_mapper[str(img_id)]
+            objects = [self.location_embedding(self.resolution, img_size, _object) for _object in _objects]
+        else:
+            objects = []
         
         # batch, time, channel, height, width
         imgs = img.repeat(captions.size()[0], *([1] * 4))
@@ -542,12 +548,13 @@ def build_cc3m_dataset(
     tokenizer: Tokenizer,
     config_path=default_config_path,
     text_mode: str = 'once',
-    raw_resolution: bool = False
+    raw_resolution: bool = False,
+    return_objects: bool = True
 ):
     config = parse_yaml(config_path)
     image_processor = ValImageProcessor() if raw_resolution is False else RawResolutionImageProcessor()
     text_processor = CaptionProcessor(config['cc3m']['txt_mapper_path'], tokenizer, text_mode)
-    return CC3MDataset(tokenizer, image_processor, text_processor, config_path)
+    return CC3MDataset(tokenizer, image_processor, text_processor, LocationEmbedding(), return_objects, config_path)
 
 
 '''

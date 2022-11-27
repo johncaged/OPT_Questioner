@@ -79,8 +79,9 @@ def main():
     # max_iter = 100000 // batch_size
     
     def process_tip(*tip_items):
-        caption_tip = tokenizer.concat_tokens(tip_items, tokenizer.task_prompt_sep_token)
-        caption_tip = tokenizer.get_padded_tokens(caption_tip).unsqueeze(0)
+        _tip = tokenizer.concat_tokens(tip_items, tokenizer.task_prompt_sep_token)
+        _tip = tokenizer.get_padded_tokens(_tip).unsqueeze(0)
+        return _tip
     
     for i, batch in enumerate(val_dataset):
         start_time = time.time()

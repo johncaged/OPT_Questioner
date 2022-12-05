@@ -173,6 +173,8 @@ class BaseQuestioner(QuestionerModule):
     def forward(self, batch):
         batch = reshape_tensor(batch)
         img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips' if self._forward != 'caption' else 'caption_tips']) , ToCuda(batch['targets' if self._forward != 'caption' else 'caption_targets'])
+        if 'region' in batch:
+            img._custom_region_data = batch['region']
 
         if self.auto_regressive is False:
             # random mask the target.

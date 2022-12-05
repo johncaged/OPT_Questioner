@@ -711,7 +711,8 @@ class VGDataset(Dataset):
             'tips': tip,
             'targets': target,
             'caption_tips': caption_tip,
-            'caption_targets': caption_target
+            'caption_targets': caption_target,
+            'region': region if region is not None else (0, 0, self.resolution - 1, self.resolution - 1)
         }, target, [str(img_id)] * tip.size()[0]
     
     def __len__(self):

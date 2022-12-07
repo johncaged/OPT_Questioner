@@ -90,12 +90,19 @@ class QuestionerModule(nn.Module):
         clip_weight = torch.load(os.path.join(pretrained_path, config['clip_pretrained_path']), map_location='cpu')
         if config['pretrained_resolution'] != config['video_resolution']:
             self.adapt_clip_resolution(clip_weight, config['video_resolution'])
-        self.clip.load_state_dict(clip_weight)
-        self.bert.load_state_dict(torch.load(os.path.join(pretrained_path, config['bert_pretrained_path']), map_location='cpu'))
-        self.cls_head.load_state_dict(torch.load(os.path.join(pretrained_path, config['cls_head_pretrained_path']), map_location='cpu'))
-        self.video_feature_adapter.load_state_dict(torch.load(os.path.join(pretrained_path, config['video_feature_adapter_pretrained_path']), map_location='cpu'))
+        self._load_state_dict(self.clip, 'clip', clip_weight)
+        self._load_state_dict(self.bert, 'bert', torch.load(os.path.join(pretrained_path, config['bert_pretrained_path']), map_location='cpu'))
+        self._load_state_dict(self.cls_head, 'cls_head', torch.load(os.path.join(pretrained_path, config['cls_head_pretrained_path']), map_location='cpu'))
+        self._load_state_dict(self.video_feature_adapter, 'video_feature_adapter', torch.load(os.path.join(pretrained_path, config['video_feature_adapter_pretrained_path']), map_location='cpu'))
         self.video_frame_embedding = nn.Parameter(torch.load(os.path.join(pretrained_path, config['video_frame_embedding_pretrained_path']), map_location='cpu'))
         self.video_type_embedding = nn.Parameter(torch.load(os.path.join(pretrained_path, config['video_type_embedding_pretrained_path']), map_location='cpu'))
+
+    @staticmethod
+    def _load_state_dict(module, module_name, *args, **kwargs):
+        missing_keys, unexpected_keys = module.load_state_dict(*args, **kwargs, strict=False)
+        print('{}:'.format(module_name))
+        print('missing keys: {}'.format(missing_keys))
+        print('unexpected keys: {}'.format(unexpected_keys))
 
     def adapt_clip_resolution(self, weight, video_resolution):
         vision_width = weight["visual.conv1.weight"].shape[0]
@@ -124,7 +131,7 @@ class QuestionerModule(nn.Module):
             'decoder.weight': bert_weight['cls.predictions.decoder.weight'],
             'decoder.bias': bert_weight['cls.predictions.bias']
         }
-        self.cls_head.load_state_dict(cls_head_weight)
+        self._load_state_dict(self.cls_head, 'cls_head', cls_head_weight)
         del bert_weight, cls_head_weight
 
 
@@ -154,9 +161,9 @@ class BaseQuestioner(QuestionerModule):
         prompt = self.tokenizer.tokenize_without_padding(content)
         return ToCuda(torch.cat([torch_convert(prompt), torch_convert([self.tokenizer.task_prompt_sep_token])], dim=1))
     
-    def forward_video(self, video):
+    def forward_video(self, video, region=None):
         b, n, _, h, w = video.shape
-        video_output = self.clip.encode_image(video.reshape(b * n, 3, h, w))
+        video_output = self.clip.encode_image(video.reshape(b * n, 3, h, w), region)
         video_output = video_output.reshape(b, -1, *video_output.shape[-2:])
         return self.get_video_multimodal_embedding(video_output)
 
@@ -171,17 +178,16 @@ class BaseQuestioner(QuestionerModule):
         return video
 
     def forward(self, batch):
-        batch = reshape_tensor(batch)
+        batch: dict = reshape_tensor(batch)
         img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips' if self._forward != 'caption' else 'caption_tips']) , ToCuda(batch['targets' if self._forward != 'caption' else 'caption_targets'])
-        if 'region' in batch:
-            img._custom_region_data = batch['region']
+        region = batch.setdefault('region', None) if self._forward != 'caption' else batch.setdefault('caption_region', None)
 
         if self.auto_regressive is False:
             # random mask the target.
             target, labels = self.masker(target, 0.6, answer_mask=self._forward == 'answer')
             if self._forward == 'answer':
                 tip[:, 1] = self.tokenizer.answer_type_mask_token
-            video_input = self.forward_video(img)
+            video_input = self.forward_video(img, region)
             output_txt = self.video_language_process(video_input, tip, target)
             output_txt = output_txt[labels != -1]
             prediction_scores = self.cls_head(output_txt)
@@ -191,7 +197,7 @@ class BaseQuestioner(QuestionerModule):
         else:
             # using cache to optimize performance
             if 'video_input' not in batch:
-                batch['video_input'] = self.forward_video(img)
+                batch['video_input'] = self.forward_video(img, region)
             video_input = batch['video_input']
             output_txt = self.video_language_process(video_input, tip, target)
             output_txt = output_txt[:, -1]

@@ -137,6 +137,10 @@ class LocationEmbedding:
 
     def __call__(self, resolution, img_size, region):
         # embed location
+        x1, y1, x2, y2 = self.transfer_location(resolution, img_size, region)
+        return self.get_location_tokens(x1, y1, x2, y2)
+
+    def transfer_location(self, resolution, img_size, region):
         if region is None:
             # full image
             x1, y1, x2, y2 = 0, 0, resolution - 1, resolution - 1
@@ -146,7 +150,7 @@ class LocationEmbedding:
             y1 = min(round(region[1] * resolution / img_size[1]), resolution - 1)
             x2 = min(round(region[2] * resolution / img_size[0]), resolution - 1)
             y2 = min(round(region[3] * resolution / img_size[1]), resolution - 1)
-        return self.get_location_tokens(x1, y1, x2, y2)
+        return x1, y1, x2, y2
 
     def get_location_tokens(self, *values):
         return ['[unused{}]'.format(value + self.start_from) for value in values]
@@ -712,8 +716,15 @@ class VGDataset(Dataset):
             'targets': target,
             'caption_tips': caption_tip,
             'caption_targets': caption_target,
-            'region': region if region is not None else (0, 0, self.resolution - 1, self.resolution - 1)
+            'region': self.generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, region), self.resolution),
+            'caption_region': self.generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, caption_task_region_area), self.resolution)
         }, target, [str(img_id)] * tip.size()[0]
+    
+    @staticmethod
+    def generate_indicator(region, resolution):
+        indicator = torch.zeros(resolution, resolution, dtype=int)
+        indicator[region[1]:region[3] + 1, region[0]:region[2] + 1] = 1
+        return indicator
     
     def __len__(self):
         return len(self.ids)

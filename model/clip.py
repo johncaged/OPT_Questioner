@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 import math
 from torch_lib.util import NOTHING as LOGGER
+from utils import ToCuda
 # from utils.logger import LOGGER
 class Bottleneck(nn.Module):
     expansion = 4
@@ -137,7 +138,7 @@ class ModifiedResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x):
+    def forward(self, x, region=None):
         def stem(x):
             x = self.relu1(self.bn1(self.conv1(x)))
             x = self.relu2(self.bn2(self.conv2(x)))
@@ -226,6 +227,13 @@ class VisionTransformer(nn.Module):
         self.input_resolution = input_resolution
         self.output_dim = output_dim
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+        # target embedding
+        self.embedding_dim = 3
+        self.conv_target = nn.Conv2d(in_channels=self.embedding_dim, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+        embedding_scale = self.embedding_dim ** -0.5
+        self.target_embedding = nn.Parameter(embedding_scale * torch.randn(self.embedding_dim))
+        self.non_target_embedding = nn.Parameter(embedding_scale * torch.randn(self.embedding_dim))
+        
         self.patch_size = patch_size
         scale = width ** -0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
@@ -256,8 +264,20 @@ class VisionTransformer(nn.Module):
 
     #     return x
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, region=None):
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
         x = self.conv1(x)  # shape = [*, width, grid, grid]
+        
+        if region is not None:
+            region = region.unsqueeze(1).expand(-1, self.embedding_dim, -1, -1)  # shape = [*, embedding_dim, H, W]
+            region_embedding = torch.where(
+                ToCuda(region) == 1,
+                self.target_embedding.reshape(1, self.embedding_dim, 1, 1).expand(B, -1, H, W),
+                self.non_target_embedding.reshape(1, self.embedding_dim, 1, 1).expand(B, -1, H, W)
+            )  # shape = [*, embedding_dim, H, W]
+            region_embedding = self.conv_target(region_embedding)  # shape = [*, width, grid, grid]
+            x = x + region_embedding
+
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
@@ -363,8 +383,8 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-    def encode_image(self, image):
-        return self.visual(image.type(self.dtype))
+    def encode_image(self, image, region=None):
+        return self.visual(image.type(self.dtype), region)
 
     def encode_text(self, txt_tokens, task_prompt = None, video_feat = None, audio_feat=None, \
                             casual = True):

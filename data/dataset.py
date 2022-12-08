@@ -132,12 +132,19 @@ class LocationEmbedding:
         self,
         start_from: int = 100
     ):
-        # TODO: record unused location
+        self.token_count = {}
         self.start_from = start_from
 
     def __call__(self, resolution, img_size, region):
         # embed location
         x1, y1, x2, y2 = self.transfer_location(resolution, img_size, region)
+        
+        def count(_key):
+            self.token_count.setdefault(str(_key), 0)
+            self.token_count[str(_key)] = self.token_count[str(_key)] + 1
+            return count
+
+        count(x1)(y1)(x2)(y2)
         return self.get_location_tokens(x1, y1, x2, y2)
 
     def transfer_location(self, resolution, img_size, region):

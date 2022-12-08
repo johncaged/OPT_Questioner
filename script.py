@@ -1,12 +1,13 @@
 from vqa_utils.vqaTools.vqa import VQA
 from utils import parse_yaml, default_config_path
-from data.dataset import CC3MDataset, Tokenizer, build_cc3m_dataset, CaptionProcessor
+from data.dataset import CC3MDataset, Tokenizer, build_cc3m_dataset, CaptionProcessor, build_vg_dataset
 from torch.utils.data import DataLoader
 import torch
 import json
 from vqa_utils.vqaTools.vqa import VQA
 import random
 import glob
+import tqdm
 
 
 def main():
@@ -257,6 +258,23 @@ def main12():
     with open('./selected_imgs.json', 'w') as f:
         json.dump(selected_imgs, f, indent=4)
 
+
+def main13():
+    # check untrained location token
+    dataset = build_vg_dataset('train', Tokenizer())
+    dataloader = DataLoader(dataset, batch_size=64)
+    for _ in range(100):
+        for _ in tqdm.tqdm(dataloader):
+            pass
+    token_count = dataset.location_embedding.token_count
+    
+    untrained_tokens = []
+    for i in range(224):
+        if str(i) not in token_count:
+            untrained_tokens.append(str(i))
+    print(untrained_tokens)
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -268,4 +286,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main12()
+    main13()

@@ -17,7 +17,7 @@ def main():
     # tokenizer
     tokenizer = Tokenizer()
     # build and load model
-    model = BaseQuestioner(tokenizer, MultiStageAdapter())
+    model = BaseQuestioner(tokenizer, MultiStageAdapter(), use_img_region_embedding=True)
     model = DDP(model)
     
     # resume

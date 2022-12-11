@@ -145,6 +145,7 @@ class BaseQuestioner(QuestionerModule):
         tokenizer: Tokenizer,
         questioner_adapter,
         auto_regressive: bool = False,
+        use_img_region_embedding: bool = True,
         *args,
         **kwargs
     ):
@@ -153,6 +154,7 @@ class BaseQuestioner(QuestionerModule):
         self.tokenizer = tokenizer
         self.questioner_adapter = questioner_adapter
         self.auto_regressive = auto_regressive
+        self.use_img_region_embedding = use_img_region_embedding
         self._forward = None
     
     def get_task_prompt(self, content, batch_size):
@@ -180,7 +182,11 @@ class BaseQuestioner(QuestionerModule):
     def forward(self, batch):
         batch: dict = reshape_tensor(batch)
         img, tip, target = ToCuda(batch['imgs']), ToCuda(batch['tips' if self._forward != 'caption' else 'caption_tips']) , ToCuda(batch['targets' if self._forward != 'caption' else 'caption_targets'])
-        region = batch.setdefault('region', None) if self._forward != 'caption' else batch.setdefault('caption_region', None)
+        
+        if self.use_img_region_embedding is True:
+            region = batch.setdefault('region', None) if self._forward != 'caption' else batch.setdefault('caption_region', None)
+        else:
+            region = None
 
         if self.auto_regressive is False:
             # random mask the target.

@@ -25,7 +25,7 @@ def main():
     # resume
     checkpoint = torch.load('./log/vg_224_512_embedding/checkpoint/checkpoint_36.pth', map_location='cpu')
     # checkpoint = torch.load('./log/vg_224_512/checkpoint/checkpoint_36.pth', map_location='cpu')
-    model.load_state_dict(checkpoint['model'])
+    model.load_state_dict(checkpoint['model'], strict=False)
     del checkpoint
     # build dataset
     val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer), 512)

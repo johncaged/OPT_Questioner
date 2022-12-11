@@ -19,10 +19,12 @@ def main():
     tokenizer = Tokenizer()
     # build and load model
     model = BaseQuestioner(tokenizer, MultiStageAdapter(), use_img_region_embedding=True)
-    model = DDP(model)
+    # model = BaseQuestioner(tokenizer, MultiStageAdapter(), use_img_region_embedding=False)
+    model = DDP(ToCuda(model))
     
     # resume
-    checkpoint = torch.load('./log//checkpoint/checkpoint_.pth', map_location='cpu')
+    checkpoint = torch.load('./log/vg_224_512_embedding/checkpoint/checkpoint_36.pth', map_location='cpu')
+    # checkpoint = torch.load('./log/vg_224_512/checkpoint/checkpoint_36.pth', map_location='cpu')
     model.load_state_dict(checkpoint['model'])
     del checkpoint
     # build dataset

@@ -36,7 +36,7 @@ class EvalCallback(Callback):
         super().__init__()
         self.rank = dist.get_rank()
     
-    def epoch_end(self, ctx):
+    def end(self, ctx):
         ctx.custom.epoch_metrics.append(ctx.epoch.eval_metrics)
         ctx.custom.epoch_losses.append(ctx.epoch.eval_loss)
 

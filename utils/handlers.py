@@ -78,3 +78,15 @@ def set_handler(proxy):
         SetModelHandler('caption')
     ]))
     proxy.run.train[1][9].insert(3, CoverLossHandler())
+
+    proxy.build_eval()
+    proxy.run.eval[4].insert(1, HandlerContainer([
+        SetModelHandler('question'),
+        proxy.handler.Forward(),
+        proxy.handler.Loss(),
+        SetModelHandler('answer'),
+        proxy.handler.Forward(),
+        proxy.handler.Loss(),
+        SetModelHandler('caption')
+    ]))
+    proxy.run.eval[4].insert(4, CoverLossHandler())

@@ -28,3 +28,19 @@ class MyCallback(Callback):
         # print new line in slurm mode to avoid output could not be seen.
         if 'SLURM_PROCID' in os.environ and self.rank == 0:
             print()
+
+
+class EvalCallback(Callback):
+    
+    def __init__(self):
+        super().__init__()
+        self.rank = dist.get_rank()
+    
+    def epoch_end(self, ctx):
+        ctx.custom.epoch_metrics.append(ctx.epoch.eval_metrics)
+        ctx.custom.epoch_losses.append(ctx.epoch.eval_loss)
+
+    def step_end(self, ctx):
+        # print new line in slurm mode to avoid output could not be seen.
+        if 'SLURM_PROCID' in os.environ and self.rank == 0:
+            print()

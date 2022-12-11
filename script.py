@@ -261,9 +261,10 @@ def main12():
 
 def main13():
     # check untrained location token
+    import json
     dataset = build_vg_dataset('train', Tokenizer())
     dataloader = DataLoader(dataset, batch_size=64)
-    for _ in range(100):
+    for _ in range(50):
         for _ in tqdm.tqdm(dataloader):
             pass
     token_count = dataset.location_embedding.token_count
@@ -273,6 +274,8 @@ def main13():
         if str(i) not in token_count:
             untrained_tokens.append(str(i))
     print(untrained_tokens)
+    with open('token_count_50.json', 'w') as f:
+        json.dump(token_count, f, indent=4)
 
 
 def create_index(data):

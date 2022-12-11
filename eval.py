@@ -1,34 +1,64 @@
 from torch_lib import Proxy
-from model.model import QuestionerGenerator, ModelWrapper
-from torch_lib import Proxy
+from model.model import BaseQuestioner, MultiStageAdapter
 from utils import ToCuda
-from data.dataset import build_coco_dataset, Tokenizer
-from torch.utils.data import DataLoader
-from utils.metrics import MyMetric
+from data.dataset import build_vg_dataset, Tokenizer
+from utils.metrics import MultiTaskMetric
 import torch
 from utils.loss import Loss
+from utils import set_DDP
+from apex.parallel import DistributedDataParallel as DDP
+from utils.callbacks import EvalCallback
 
 
 def main():
+    args = get_args()
+    set_DDP(args)
+
     # tokenizer
     tokenizer = Tokenizer()
     # build and load model
-    model = QuestionerGenerator(tokenizer=tokenizer)
-    model = ModelWrapper(model)
-    checkpoint = torch.load('./log/test/checkpoint/checkpoint.pt', map_location='cpu')
+    model = BaseQuestioner(tokenizer, MultiStageAdapter())
+    model = DDP(model)
+    
+    # resume
+    checkpoint = torch.load('./log//checkpoint/checkpoint_.pth', map_location='cpu')
     model.load_state_dict(checkpoint['model'])
-    model.eval()
     del checkpoint
-    model: QuestionerGenerator = ToCuda(model.module)
-    val_dataset = DataLoader(build_coco_dataset('answer', 'val', tokenizer, True, 'once'), batch_size=10, shuffle=True)
+    # build dataset
+    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer), 512)
+    # torch-lib pipeline
     proxy = Proxy(model)
+    set_handler(proxy)
+    proxy.count_params('M')
     proxy.build(
-        # loss=Loss(),
-        metrics=MyMetric()
+        loss=Loss(label_smoothing=0.0),
+        metrics=MultiTaskMetric()
     )
-    proxy.eval(
-        val_dataset
-    )
+    
+    proxy.custom.epoch_metrics = []
+    proxy.custom.epoch_losses = []
+    
+    iteration = 10
+    
+    for _ in range(iteration):
+        proxy.eval(
+            val_dataset,
+            callbacks=EvalCallback()
+        )
+    
+    metrics = {}
+    sum_loss = 0
+    for item_metrics, item_loss in zip(proxy.custom.epoch_metrics, proxy.custom.epoch_losses):
+        for key, value in item_metrics.items():
+            metrics.setdefault(key, 0.0)
+            metrics[key] = metrics[key] + float(value)
+        sum_loss += float(item_loss)
+    
+    for key in metrics.keys():
+        metrics[key] /= iteration
+    sum_loss /= iteration
+    print(metrics)
+    print(sum_loss)
 
 
 if __name__ == '__main__':

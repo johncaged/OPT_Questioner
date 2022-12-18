@@ -18,6 +18,7 @@ import copy
 from model.clip import CLIP
 import collections
 import re
+import copy
 
 
 '''------------------------------------------dataset utils.------------------------------------------'''
@@ -161,6 +162,12 @@ class LocationEmbedding:
 
     def get_location_tokens(self, *values):
         return ['[unused{}]'.format(value + self.start_from) for value in values]
+
+
+def generate_indicator(region, resolution):
+    indicator = torch.zeros(resolution, resolution, dtype=int)
+    indicator[region[1]:region[3] + 1, region[0]:region[2] + 1] = 1
+    return indicator
 
 
 '''
@@ -489,6 +496,7 @@ class CC3MDataset(Dataset):
         text_processor: CaptionProcessor,
         location_embedding: LocationEmbedding,
         return_objects: bool,
+        region_area_threshold: float = 0.3,
         config_path=default_config_path
     ):
         super().__init__()
@@ -508,6 +516,7 @@ class CC3MDataset(Dataset):
         self.image_processor = image_processor
         self.text_processor = text_processor
         self.location_embedding = location_embedding
+        self.region_area_threshold = region_area_threshold
     
     def __getitem__(self, index):
         img_name = self.img_names[index]
@@ -523,13 +532,16 @@ class CC3MDataset(Dataset):
         
         if self.return_objects is True:
             _objects = self.object_mapper[str(img_id)]
+            _objects = self.filter_region_area(_objects, img_size)
             objects = [self.location_embedding(self.resolution, img_size, _object) for _object in _objects]
+            object_embeddings = [generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, _object), self.resolution) for _object in _objects]
         else:
             objects = []
+            object_embeddings = []
         
         # batch, time, channel, height, width
         imgs = img.repeat(captions.size()[0], *([1] * 4))
-        return {'imgs': imgs, 'tips': captions, 'objects': objects}, str(img_id)
+        return {'imgs': imgs, 'tips': captions, 'objects': objects, 'object_embeddings': object_embeddings}, str(img_id)
     
     def __len__(self):
         return len(self.img_names)
@@ -539,12 +551,13 @@ class CC3MDataset(Dataset):
         imgs = list(map(lambda item: item[0]['imgs'], batch))
         tips = list(map(lambda item: item[0]['tips'], batch))
         objects = list(map(lambda item: item[0]['objects'], batch))
+        object_embeddings = list(map(lambda item: item[0]['object_embeddings'], batch))
         
         img_ids = []
         for item in zip(batch, tips):
             img_ids.extend([item[0][1]] * item[1].size()[0])
         
-        return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0), 'objects': objects}, img_ids
+        return {'imgs': torch.cat(imgs, dim=0), 'tips': torch.cat(tips, dim=0), 'objects': objects, 'object_embeddings': object_embeddings}, img_ids
     
     @staticmethod
     def raw_resolution_collate_fn(batch):
@@ -554,18 +567,34 @@ class CC3MDataset(Dataset):
             img_ids.extend([item[0][1]] * item[1].size()[0])
         return {'imgs': imgs}, img_ids
 
+    def filter_region_area(self, objects, img_size):
+        img_area = img_size[0] * img_size[1]
+        
+        def filter_region(item):
+            width = item[2] - item[0]
+            height = item[3] - item[1]
+            return width * height >= img_area * self.region_area_threshold
+        
+        copied_objects = copy.deepcopy(objects)
+        filter(filter_region, copied_objects)
+        if len(copied_objects) <= 0:
+            return objects
+        else:
+            return copied_objects
+
 
 def build_cc3m_dataset(
     tokenizer: Tokenizer,
     config_path=default_config_path,
     text_mode: str = 'once',
     raw_resolution: bool = False,
-    return_objects: bool = True
+    return_objects: bool = True,
+    region_area_threshold: float = 0.3
 ):
     config = parse_yaml(config_path)
     image_processor = ValImageProcessor() if raw_resolution is False else RawResolutionImageProcessor()
     text_processor = CaptionProcessor(config['cc3m']['txt_mapper_path'], tokenizer, text_mode)
-    return CC3MDataset(tokenizer, image_processor, text_processor, LocationEmbedding(), return_objects, config_path)
+    return CC3MDataset(tokenizer, image_processor, text_processor, LocationEmbedding(), return_objects, region_area_threshold, config_path)
 
 
 '''
@@ -727,15 +756,9 @@ class VGDataset(Dataset):
             'targets': target,
             'caption_tips': caption_tip,
             'caption_targets': caption_target,
-            'region': self.generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, region), self.resolution),
-            'caption_region': self.generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, caption_task_region_area), self.resolution)
+            'region': generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, region), self.resolution),
+            'caption_region': generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, caption_task_region_area), self.resolution)
         }, target, [str(img_id)] * tip.size()[0]
-    
-    @staticmethod
-    def generate_indicator(region, resolution):
-        indicator = torch.zeros(resolution, resolution, dtype=int)
-        indicator[region[1]:region[3] + 1, region[0]:region[2] + 1] = 1
-        return indicator
     
     def filter_noise(self):
         ids_to_remove = []

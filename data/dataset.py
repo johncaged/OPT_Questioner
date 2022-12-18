@@ -670,7 +670,8 @@ class VGDataset(Dataset):
         caption_task: CaptionTask,
         image_path: str,
         id_path: str,
-        config_path=default_config_path
+        config_path=default_config_path,
+        filter_noise: bool = True
     ):
         super().__init__()
         config = parse_yaml(config_path)
@@ -685,6 +686,9 @@ class VGDataset(Dataset):
         # read image id
         with open(id_path) as f:
             self.ids = json.load(f)
+        # filter unmatched qa to region mapping
+        if filter_noise is True:
+            self.filter_noise()
     
     def __getitem__(self, index):
         img_id = self.ids[index]
@@ -733,6 +737,33 @@ class VGDataset(Dataset):
         indicator[region[1]:region[3] + 1, region[0]:region[2] + 1] = 1
         return indicator
     
+    def filter_noise(self):
+        ids_to_remove = []
+        for img_id in self.ids:
+            qas = self.text_processor.txt_mapper[str(img_id)]
+            qas_to_remove = []
+            # match qa to region
+            for qa in qas:
+                qa_id = qa['qa_id']
+                _, result = self.question_region_mapper(img_id, qa_id)
+                if result is None:
+                    qas_to_remove.append(qa)
+            # remove whole img
+            if len(qas) == len(qas_to_remove):
+                ids_to_remove.append(img_id)
+            # remove unmatched qas
+            for _qa in qas_to_remove:
+                qas.remove(_qa)
+        for _id in ids_to_remove:
+            self.ids.remove(_id)
+        # count filtered data
+        print('images left: {}'.format(len(self.ids)))
+        total_qas = 0
+        for img_id in self.ids:
+            qas = self.text_processor.txt_mapper[str(img_id)]
+            total_qas += len(qas)
+        print('questions left: {}'.format(total_qas))
+
     def __len__(self):
         return len(self.ids)
 
@@ -740,7 +771,8 @@ class VGDataset(Dataset):
 def build_vg_dataset(
     mode: str,
     tokenizer: Tokenizer,
-    config_path=default_config_path
+    config_path=default_config_path,
+    filter_noise: bool = True
 ):
     img_processor_dict = {
         'train': TrainImageProcessor,
@@ -757,7 +789,9 @@ def build_vg_dataset(
         tokenizer,
         CaptionTask(items['image_region_mapper_path'], items['general_caption_path']),
         items['img_path'],
-        items['id_path']
+        items['id_path'],
+        config_path,
+        filter_noise
     )
 
 

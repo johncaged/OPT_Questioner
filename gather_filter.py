@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 
 def main(base_path='./'):
+    # filter data
     data = gather_data(base_path)
     
     yes_cnt = len(list(filter(lambda item: item['type'] == 'yes/no' and item['answer'] == 'yes', data)))
@@ -48,6 +49,7 @@ def main(base_path='./'):
 
 
 def main2(batch_size=64, base_path='./'):
+    # filter data with long tail number questions
     data = gather_data(base_path)
     
     data_img, _ = create_index(data)
@@ -83,6 +85,7 @@ def main2(batch_size=64, base_path='./'):
 
 
 def main3(base_path='./'):
+    # filter data: only balance yes/no rate
     data = gather_data(base_path)
     yes_items, no_items, number_items, other_items = separate_by_category(data)
     
@@ -93,6 +96,15 @@ def main3(base_path='./'):
     data_img, _ = create_index(filtered_data)
     print('remaining imgs after filter: {}'.format(len(data_img)))
     count_and_save(filtered_data, base_path)
+
+
+def main4(base_path='./'):
+    # filter through vg dataset style
+    data = gather_data(base_path)
+    with open(os.path.join(base_path, 'filtered_dataset.json'), 'w') as f:
+        json.dump({
+            'data': data
+        }, f, indent=4)
 
 
 def create_index(data):
@@ -178,4 +190,6 @@ def count_and_save(data, base_path):
 
 if __name__ == '__main__':
     # main()
-    main2()
+    # main2()
+    # main3()
+    main4()

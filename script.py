@@ -8,6 +8,7 @@ from vqa_utils.vqaTools.vqa import VQA
 import random
 import glob
 import tqdm
+import torch.distributed as dist
 
 
 def main():
@@ -260,11 +261,18 @@ def main12():
 
 
 def main13():
+    # check untrained positional tokens.
+    from utils import set_DDP, get_args
+    args = get_args()
+    set_DDP(args)
+    
     # check untrained location token
     import json
     dataset = build_vg_dataset('train', Tokenizer())
     dataloader = DataLoader(dataset, batch_size=64)
-    for _ in range(50):
+    iteration = 50
+    
+    for _ in range(iteration):
         for _ in tqdm.tqdm(dataloader):
             pass
     token_count = dataset.location_embedding.token_count
@@ -274,8 +282,36 @@ def main13():
         if str(i) not in token_count:
             untrained_tokens.append(str(i))
     print(untrained_tokens)
-    with open('token_count_50.json', 'w') as f:
+    with open('token_count_{}_{}.json'.format(iteration, dist.get_rank()), 'w') as f:
         json.dump(token_count, f, indent=4)
+
+
+def main14():
+    # convert object detection results
+    input_dir = '/share/group/datanlpr_ai/zkliu/bu-feat/cc3m_info'
+    import numpy as np
+    import os
+    
+    data = {}
+    top = 16
+    gen_len = 100000
+    
+    selected_imgs = []
+
+    for item in tqdm.tqdm(list(glob.glob(os.path.join(input_dir, '*.npz')))[0:gen_len]):
+        img_id = os.path.splitext(os.path.split(item)[1])[0]
+        result = np.load(item)
+        pred_boxes = result['pred_boxes'].tolist()
+        scores = result['scores'].tolist()
+        sorted_items = sorted(list(zip(pred_boxes, scores)), key=lambda item: item[1], reverse=True)[0:top]
+        data[str(img_id)] = list(zip(*sorted_items))[0]
+        selected_imgs.append('{}.jpg'.format(str(img_id)))
+
+    with open('./custom_dataset/CC3M/objects.json', 'w') as f:
+        json.dump(data, f, indent=4)
+
+    with open('./selected_imgs.json', 'w') as f:
+        json.dump(selected_imgs, f, indent=4)
 
 
 def create_index(data):
@@ -289,4 +325,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main13()
+    main14()

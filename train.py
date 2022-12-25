@@ -62,8 +62,8 @@ def main():
     # del train_data, train2_data
     # val_dataset, _ = build_dataloader(build_coco_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
     
-    train_dataset, train_sampler = build_dataloader(build_vg_dataset('train', tokenizer, filter_noise=False), 512)
-    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer, filter_noise=False), 512)
+    train_dataset, train_sampler = build_dataloader(build_vg_dataset('train', tokenizer, filter_noise=False), 256)
+    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer, filter_noise=False), 256)
     # torch-lib pipeline
     proxy = Proxy(model)
     proxy.custom.train_sampler = train_sampler

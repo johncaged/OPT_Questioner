@@ -21,14 +21,15 @@ from utils import get_args, set_DDP
 
 warnings.filterwarnings('ignore')
 
-config = parse_yaml(default_config_path)
-set_base_path(config['base_path'])
-set_namespace(config['namespace'])
-
 
 def main():
     args = get_args()
     set_DDP(args)
+    
+    if dist.get_rank() == 0:
+        config = parse_yaml(default_config_path)
+        set_base_path(config['base_path'])
+        set_namespace(config['namespace'])
 
     # tokenizer
     tokenizer = Tokenizer()
@@ -36,8 +37,13 @@ def main():
     # model = BaseQuestioner(tokenizer, QuestionerWithCaption())
     model = BaseQuestioner(tokenizer, MultiStageAdapter())
     model.load_pretrained_weights()
+    
     # optimizer
-    optimizer = Adam(model.parameters(), lr=1e-5)
+    clip_ids = set(map(id, model.clip.parameters()))
+    optimizer = Adam([
+        {"params": filter(lambda p: id(p) not in clip_ids, model.parameters())},
+        {"params": model.clip.parameters(), "lr": 5e-7}
+    ], lr=2e-5)
     
     model, optimizer = amp.initialize(ToCuda(model), optimizer, enabled=args.fp16, opt_level='O2')
     model = DDP(model)
@@ -56,18 +62,29 @@ def main():
     # del train_data, train2_data
     # val_dataset, _ = build_dataloader(build_coco_dataset('caption', 'val', tokenizer, text_encoder=model.module.clip), 512)
     
-    train_dataset, train_sampler = build_dataloader(build_vg_dataset('train', tokenizer), 512)
-    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer), 512)
+    train_dataset, train_sampler = build_dataloader(build_vg_dataset('train', tokenizer, filter_noise=False), 512)
+    val_dataset, _ = build_dataloader(build_vg_dataset('val', tokenizer, filter_noise=False), 512)
     # torch-lib pipeline
     proxy = Proxy(model)
     proxy.custom.train_sampler = train_sampler
     set_handler(proxy)
     proxy.count_params('M')
-    total_epoch = 50
+    total_epoch = 200
+
+    def linear_warmup_exp_decay(epoch):
+        rate = 0.1
+        warmup_epochs = int(total_epoch * rate)
+        if epoch < warmup_epochs:
+            lr_rate = (epoch + 1) / (warmup_epochs + 1)
+        else:
+            lr_rate = (1 - (epoch - warmup_epochs) / (total_epoch - warmup_epochs)) ** 0.9
+        print('Epoch {} - LR rate: {}'.format(epoch, lr_rate))
+        return lr_rate
+
     proxy.build(
         loss=Loss(label_smoothing=0.0),
         optimizer=optimizer,
-        lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=lambda epoch: (1 - epoch / total_epoch) ** 0.9),
+        lr_decay=LambdaLR(optimizer=optimizer, lr_lambda=linear_warmup_exp_decay),
         metrics=MultiTaskMetric()
     )
     proxy.train(

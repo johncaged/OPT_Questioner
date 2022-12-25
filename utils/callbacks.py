@@ -26,7 +26,7 @@ class MyCallback(Callback):
 
     def step_end(self, ctx):
         # print new line in slurm mode to avoid output could not be seen.
-        if 'SLURM_PROCID' in os.environ and self.rank == 0:
+        if 'SLURM_PROCID' in os.environ and self.rank == 0 and ctx.step.current % 20 == 0:
             print()
 
 

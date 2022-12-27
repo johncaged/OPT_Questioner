@@ -294,7 +294,7 @@ def main14():
     
     data = {}
     top = 16
-    gen_len = 100000
+    gen_len = 1000000
     
     selected_imgs = []
 
@@ -303,6 +303,9 @@ def main14():
         result = np.load(item)
         pred_boxes = result['pred_boxes'].tolist()
         scores = result['scores'].tolist()
+        if len(pred_boxes) <= 0 or len(scores) <= 0 or len(pred_boxes) != len(scores):
+            print('Image {} has no detected object.'.format(img_id))
+            continue
         sorted_items = sorted(list(zip(pred_boxes, scores)), key=lambda item: item[1], reverse=True)[0:top]
         data[str(img_id)] = list(zip(*sorted_items))[0]
         selected_imgs.append('{}.jpg'.format(str(img_id)))

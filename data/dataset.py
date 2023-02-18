@@ -63,7 +63,7 @@ class Tokenizer:
         output[:len(tokens)] = tokens
         return output
 
-    def concat_tokens(self, tokens, sep):
+    def concat_tokens(self, tokens, sep, cut_max_len=False, max_len: int = None):
         def encode(_item):
             return self.tokenize_without_padding(_item) if re.fullmatch('\[unused.*\]', _item) is None else self.tokenizer.convert_tokens_to_ids([_item])
         
@@ -76,6 +76,15 @@ class Tokenizer:
             else:
                 temp = encode(token)
             _tokens.append(temp)
+
+        if cut_max_len:
+            _sum = len(_tokens) - 1
+            for token in _tokens:
+                _sum += len(token)
+            max_len = max_len if max_len is not None else self.max_len
+            if _sum > max_len:
+                raise RuntimeError
+        
         result = []
         for token in _tokens:
             result.extend(token)
@@ -635,11 +644,20 @@ class VGTextProcessor:
     def process(self, img_id):
         # read qa
         qas = self.txt_mapper[str(img_id)]
-        qa = random.choice(qas)
-        question_type = self.get_question_type(qa['question'], qa['answer'])
-        target = self.tokenizer.concat_tokens([self.clean(qa['question']), self.clean(qa['answer'])], self.tokenizer.question_answer_sep_token)
-        target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
-        return target, question_type, qa['qa_id']
+        error_count = 0
+        while True:
+            try:
+                qa = random.choice(qas)
+                question_type = self.get_question_type(qa['question'], qa['answer'])
+                target = self.tokenizer.concat_tokens([self.clean(qa['question']), self.clean(qa['answer'])], self.tokenizer.question_answer_sep_token, cut_max_len=True)
+                target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
+                return target, question_type, qa['qa_id']
+            except Exception:
+                with open('error.txt', 'a') as f:
+                    f.write('Resample qas - img_id: {}\n'.format(img_id))
+                error_count += 1
+                if error_count >= 10:
+                    raise RuntimeError
 
     def get_question_type(self, question, answer):
         first_word = self.clean(self.tokenizer.tokenizer.tokenize(question)[0])
@@ -740,6 +758,24 @@ class VGDataset(Dataset):
             self.filter_noise()
     
     def __getitem__(self, index):
+        try:
+            return self.safe_get(index)
+        except Exception:
+            pass
+
+        error_count = 1
+        while True:
+            try:
+                with open('error.txt', 'a') as f:
+                    f.write('Resample image - error img_id: {}\n'.format(self.ids[index]))
+                index = random.randint(0, self.__len__() - 1)
+                return self.safe_get(index)
+            except Exception:
+                error_count += 1
+                if error_count >= 10:
+                    raise RuntimeError
+
+    def safe_get(self, index):
         img_id = self.ids[index]
         # read image
         img_path = os.path.join(self.image_path, '{}.jpg'.format(img_id))
@@ -779,7 +815,7 @@ class VGDataset(Dataset):
             'region': generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, region), self.resolution),
             'caption_region': generate_indicator(self.location_embedding.transfer_location(self.resolution, img_size, caption_task_region_area), self.resolution)
         }, target, [str(img_id)] * tip.size()[0]
-    
+
     def filter_noise(self):
         ids_to_remove = []
         for img_id in self.ids:

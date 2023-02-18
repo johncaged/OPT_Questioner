@@ -519,10 +519,30 @@ class CC3MDataset(Dataset):
         self.region_area_threshold = region_area_threshold
     
     def __getitem__(self, index):
+        # get original data
+        try:
+            return self.get_item(index)
+        except Exception:
+            pass
+        # get alternative data
+        while True:
+            try:
+                print('Image {} got an error.'.format(self.img_names[index]))
+                with open('error.txt', 'a') as f:
+                    f.write('Image {} got an error.\n'.format(self.img_names[index]))
+                index = random.randint(0, self.__len__() - 1)
+                return self.get_item(index)
+            except Exception:
+                pass
+
+    def get_item(self, index):
         img_name = self.img_names[index]
         
         img_path = os.path.join(self.img_path, img_name)
-        img = Image.open(img_path)
+        if os.path.exists(img_path):
+            img = Image.open(img_path)
+        elif os.path.exists(os.path.splitext(img_path)[0]):
+            img = Image.open(os.path.splitext(img_path)[0])
         img_size = img.size[0], img.size[1]
         img = self.image_processor.process(img).unsqueeze(0)
         
@@ -542,7 +562,7 @@ class CC3MDataset(Dataset):
         # batch, time, channel, height, width
         imgs = img.repeat(captions.size()[0], *([1] * 4))
         return {'imgs': imgs, 'tips': captions, 'objects': objects, 'object_embeddings': object_embeddings}, str(img_id)
-    
+
     def __len__(self):
         return len(self.img_names)
 
@@ -610,20 +630,20 @@ class VGTextProcessor:
         self.tokenizer = tokenizer
         with open(question_answer_path) as f:
             self.txt_mapper = json.load(f)
-        self.question_types = set(['what', 'how', 'where', 'who', 'why', 'when'])
+        self.question_types = set(['what', 'how', 'where', 'who', 'why', 'when', 'yes', 'no'])
 
     def process(self, img_id):
         # read qa
         qas = self.txt_mapper[str(img_id)]
         qa = random.choice(qas)
-        question_type = self.get_question_type(qa['question'])
+        question_type = self.get_question_type(qa['question'], qa['answer'])
         target = self.tokenizer.concat_tokens([self.clean(qa['question']), self.clean(qa['answer'])], self.tokenizer.question_answer_sep_token)
         target = self.tokenizer.get_padded_tokens(target).unsqueeze(0)
         return target, question_type, qa['qa_id']
 
-    def get_question_type(self, question):
+    def get_question_type(self, question, answer):
         first_word = self.clean(self.tokenizer.tokenizer.tokenize(question)[0])
-        return first_word if first_word in self.question_types else 'other'
+        return first_word if first_word in self.question_types else answer if answer in ['yes', 'no'] else 'other'
 
     def clean(self, text: str):
         return text.replace('.', '').lower()

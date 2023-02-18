@@ -317,10 +317,195 @@ def main14():
         json.dump(selected_imgs, f, indent=4)
 
 
+def main15():
+    # seperate large dataset into picture-indexed dataset files.
+    with open('filtered_dataset.json') as f:
+        data = json.load(f)['data']
+    
+    data_img, _ = create_index(data)
+    print('len data img: {}'.format(len(data_img)))
+    for key, value in tqdm.tqdm(data_img.items()):
+        with open('/raid/zkliu/CC3M_QA_3M/{}.json'.format(key), 'w') as f:
+            json.dump(value, f)
+
+
+def main16():
+    # count yes/no questions in VQAv2 dataset
+    tokenizer = Tokenizer().tokenizer
+    with open('./dataset/mscoco/v2_mscoco_train2014_annotations.json') as f:
+        annotations = json.load(f)['annotations']
+    
+    with open('./dataset/mscoco/v2_OpenEnded_mscoco_train2014_questions.json') as f:
+        questions = json.load(f)['questions']
+    
+    statistics = {}
+    second_statistics = {}
+    second_target = 'do'
+    
+    for question, annotation in tqdm.tqdm(zip(questions, annotations)):
+        assert question['question_id'] == annotation['question_id']
+        
+        if annotation['answer_type'] == 'yes/no':
+            words = tokenizer.tokenize(question['question'])
+            statistics.setdefault(words[0], 0)
+            statistics[words[0]] += 1
+            
+            if words[0] == second_target:
+                second_statistics.setdefault(words[1], 0)
+                second_statistics[words[1]] += 1
+    
+    count = 0
+    # check most common question proportion
+    for item in ['is', 'does', 'are', 'do']:
+        count += statistics.get(item)
+    # proportion is 0.920416821466665
+    print(statistics)
+    print(count / sum(statistics.values()))
+    print(second_statistics)
+
+
+def main17():
+    # auto generate yes/no questions using template
+    import os
+    templates = [
+        "Does this picture match the description of '{}'?",
+        "Does the sentence '{}' correctly describe the picture?",
+        "Do you think this picture matches the description of '{}'?",
+        "Is there anything matching the description of '{}' in the picture?",
+        "Is the picture consistent with the description of '{}'?",
+        "Do the descriptions '{}' and '{}' both match the picture?",
+        "Are the descriptions '{}' and '{}' both consistent with this picture?"
+    ]
+    two_descrption_question = [5, 6]
+    
+    question_dir = './dataset/cc3m_qa'
+    save_dir = './dataset/cc3m_qa_binary'
+    gen_len = 5
+    question_id = 313773934
+    question_items = os.listdir(question_dir)
+    print('len imgs:', len(question_items))
+
+    def get_other(original_item):
+        _item = original_item
+        while _item == original_item:
+            _item = random.choice(question_items)
+        with open(os.path.join(question_dir, _item)) as f:
+            _items = json.load(f)
+        return random.choice(_items)['region_description']
+    
+    def get_this(original_item, count=1):
+        with open(os.path.join(question_dir, item)) as f:
+            _items = json.load(f)
+        if count == 1:
+            return random.choice(_items)['region_description']
+        else:
+            return [random.choice(_items)['region_description'] for _ in range(count)]
+
+    for item in tqdm.tqdm(question_items):
+        qas = []
+        img_id = item[:-5]
+        for _ in range(gen_len):
+            index = random.randint(0, len(templates) - 1)
+            answer_yes = random.random() < 0.5
+            qa = {'img_id': img_id, 'question_id': question_id, 'type': 'binary', 'answer': 'yes' if answer_yes else 'no'}
+            question_id += 1
+            if index in two_descrption_question:
+                if answer_yes:
+                    qa['question'] = templates[index].format(*get_this(item, 2))
+                elif random.random() < 0.5:
+                    captions = [get_this(item), get_other(item)]
+                    random.shuffle(captions)
+                    qa['question'] = templates[index].format(*captions)
+                else:
+                    qa['question'] = templates[index].format(get_other(item), get_other(item))
+            else:
+                if answer_yes:
+                    qa['question'] = templates[index].format(get_this(item))
+                else:
+                    qa['question'] = templates[index].format(get_other(item))
+            qas.append(qa)
+        with open(os.path.join(save_dir, item), 'w') as f:
+            json.dump(qas, f)
+
+
+def main18():
+    # hash match images between VG and GQA
+    import imagehash
+    from PIL import Image
+    import os
+    vg_path = './dataset/VG/VG_100K'
+    gqa_path = './dataset/GQA/images'
+    vg_dict = {}
+    gqa_dict = {}
+    gqa_to_vg = {}
+    
+    
+    for item in tqdm.tqdm(os.listdir(vg_path)):
+        try:
+            hash_value = imagehash.phash(Image.open(os.path.join(vg_path, item)))
+        except:
+            continue
+        vg_dict[str(hash_value)] = item[:-4]
+    
+    for item in tqdm.tqdm(os.listdir(gqa_path)):
+        try:
+            hash_value = imagehash.phash(Image.open(os.path.join(gqa_path, item)))
+        except:
+            continue
+        gqa_dict[str(hash_value)] = item[:-4]
+        if str(hash_value) in vg_dict:
+            gqa_to_vg[item[:-4]] = vg_dict[str(hash_value)]
+    
+    with open('gqa_to_vg.json', 'w') as f:
+        json.dump(gqa_to_vg, f)
+
+
+def main19():
+    # merge yes/no questions and original vg questions
+    with open('./dataset/GQA/questions1.2/train_balanced_questions.json') as f:
+        gqa = json.load(f)
+    
+    with open('./dataset/GQA/questions1.2/val_balanced_questions.json') as f:
+        gqa.update(json.load(f))
+    
+    data = {}
+    for item in tqdm.tqdm(gqa.values()):
+        if item['answer'] in ['yes', 'no']:
+            data.setdefault(str(item['imageId']), [])
+            data[str(item['imageId'])].append({
+                'question': item['question'],
+                'answer': item['answer'],
+                'qa_id': -114514
+            })
+    
+    with open('./dataset/VG/txt_mapper.json') as f:
+        vg = json.load(f)
+        
+    with open('./gqa_to_vg.json') as f:
+        mapper = json.load(f)
+    
+    miss_count = 0
+    
+    for key, value in tqdm.tqdm(data.items()):
+        if key not in mapper:
+            continue
+        real_key = mapper[key]
+        
+        if real_key not in vg:
+            miss_count += 1
+            continue
+        vg[real_key].extend(value)
+    
+    print('miss count: ', miss_count)
+    
+    with open('./dataset/VG/txt_mapper_with_gqa_binary.json', 'w') as f:
+        json.dump(vg, f)
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
-    for item in data:
+    for item in tqdm.tqdm(data):
         data_q_id[item['question_id']] = item
         img_questions = data_img.setdefault(item['img_id'], [])
         img_questions.append(item)
@@ -328,4 +513,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main14()
+    main19()

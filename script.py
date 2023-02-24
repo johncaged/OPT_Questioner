@@ -570,4 +570,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main21()
+    main22()

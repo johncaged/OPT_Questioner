@@ -9,6 +9,7 @@ import random
 import glob
 import tqdm
 import torch.distributed as dist
+import os
 
 
 def main():
@@ -502,6 +503,62 @@ def main19():
         json.dump(vg, f)
 
 
+def main20():
+    # merge common qa and binary qa data
+    items = os.listdir('../CC3M_QA_3M_right_224')
+    items2 = os.listdir('../CC3M_QA_3M_binary_right_224_balanced_scale')
+    ratio = 0.1
+    
+    cnt_binary = 0
+    cnt_total = 0
+    cnt_drop = 0
+    items = list(set(items) & set(items2))
+    for item in tqdm.tqdm(items):
+        with open('../CC3M_QA_3M_right_224/{}'.format(item)) as f:
+            qas = json.load(f)
+        with open('../CC3M_QA_3M_binary_right_224_balanced_scale/{}'.format(item)) as f:
+            binary = json.load(f)
+
+        if len(qas + binary) < 1 or len(qas) < 1:
+            continue
+        
+        random.shuffle(binary)
+        temp = len(binary)
+        binary = binary[:int(ratio * len(qas))]
+        cnt_drop += (temp - len(binary))
+        cnt_binary += len(binary)
+        cnt_total += (len(binary) + len(qas))
+        with open('../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary/{}'.format(item), 'w') as f:
+            json.dump(qas + binary, f)
+    print('binary: {} - total: {} - ratio: {} - drop: {}'.format(cnt_binary, cnt_total, cnt_binary / cnt_total, cnt_drop))
+
+
+def main21():
+    # create CC3M caption + qa dataset in VALOR format
+    cc3m_qa_path = '../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary'
+    dataset_path = '../CC3M_cap_qa'
+    ids = [item[:-5] for item in os.listdir(cc3m_qa_path)]
+    with open('./dataset/cc3m/txt_mapper.json') as f:
+        txt_mapper = json.load(f)
+    
+    for _id in tqdm.tqdm(ids):
+        with open(os.path.join(cc3m_qa_path, '{}.json'.format(_id))) as f:
+            qas = json.load(f)
+        caption = txt_mapper[_id]
+        anno = {}
+        anno['video_id'] = _id
+        anno['desc'] = caption
+        anno['question'], anno['answer'] = tuple(zip(*list(map(lambda item: (item['question'], item['answer']), qas))))
+        
+        with open(os.path.join(dataset_path, '{}.json'.format(_id)), 'w') as f:
+            json.dump(anno, f)
+
+
+def main22():
+    # create CC3M caption dataset in VALOR format
+    pass
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -513,4 +570,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main19()
+    main21()

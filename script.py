@@ -559,6 +559,33 @@ def main22():
     pass
 
 
+def main23():
+    # count the distribution of CC3M-QA question types
+    cc3m_qa_path = '../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary'
+    imgs = os.listdir(cc3m_qa_path)
+    statistics = {}
+    tokenizer = Tokenizer().tokenizer
+    
+    import tqdm
+    for img in tqdm.tqdm(imgs):
+        with open(os.path.join(cc3m_qa_path, img)) as f:
+            data = json.load(f)
+        for qa in data:
+            words = tokenizer.tokenize(qa['question'])
+            item = statistics
+            # only count the first 4 words
+            for word in words[0:4]:
+                item = item.setdefault(word, {
+                    'count': 0,
+                    'successor': {}
+                })
+                item['count'] += 1
+                item = item['successor']
+    
+    with open('./custom_dataset/CC3M/statistics.json', 'w') as f:
+        json.dump(statistics, f, indent=4)
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -570,4 +597,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main22()
+    main23()

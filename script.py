@@ -555,11 +555,6 @@ def main21():
 
 
 def main22():
-    # create CC3M caption dataset in VALOR format
-    pass
-
-
-def main23():
     # count the distribution of CC3M-QA question types
     cc3m_qa_path = '../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary'
     imgs = os.listdir(cc3m_qa_path)
@@ -597,4 +592,4 @@ def create_index(data):
 
 
 if __name__ == '__main__':
-    main23()
+    main22()

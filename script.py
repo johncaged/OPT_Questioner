@@ -581,6 +581,38 @@ def main22():
         json.dump(statistics, f, indent=4)
 
 
+def main23():
+    # extract CC3M dense caption
+    import tqdm
+    cc3m_qa_path = '../CC3M_QA_3M'
+    imgs = os.listdir(cc3m_qa_path)
+    max_ = -1
+    min_ = 1000
+    
+    for img in tqdm.tqdm(imgs):
+        with open(os.path.join(cc3m_qa_path, img)) as f:
+            data = json.load(f)
+        video_id = img[:-5]
+        region = []
+        region_desc = []
+        for qa in data:
+            if qa['object'] in region and qa['region_description'] in region_desc:
+                continue
+            region.append(qa['object'])
+            region_desc.append(qa['region_description'])
+            
+            for value in qa['object']:
+                if value > max_:
+                    max_ = value
+                if value < min_:
+                    min_ = value
+        
+        with open(os.path.join('../CC3M_region_desc', img), 'w') as f:
+            json.dump({'video_id': video_id, 'region': region, 'region_desc': region_desc}, f)
+    
+    print('max: {}, min: {}'.format(max_, min_))
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}

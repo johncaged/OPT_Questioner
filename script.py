@@ -613,6 +613,44 @@ def main23():
     print('max: {}, min: {}'.format(max_, min_))
 
 
+def main24():
+    # filter 3129 qa in CC3M QA
+    import pickle
+    _dict = pickle.load(open('trainval_ans2label.pkl', 'rb'))
+    ans = set(_dict.keys())
+    print('this is nothing' in ans)
+    
+    total_cnt = 0
+    selected_cnt = 0
+    number_cnt = 0
+    from_dir = '../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary'
+    to_dir = '../CC3M_QA_3M_3129'
+    items = os.listdir(from_dir)
+    for item in tqdm.tqdm(items):
+        qas = json.load(open(os.path.join(from_dir, item)))
+        selected = []
+        for qa in qas:
+            if qa['answer'] in str(ans):
+                selected.append(qa)
+            else:
+                try:
+                    num_ans = str(spoken_word_to_number(qa['answer']))
+                except Exception:
+                    num_ans = 'this is nothing'
+                if num_ans in str(ans):
+                    qa['answer'] = num_ans
+                    selected.append(qa)
+                    number_cnt += 1
+        total_cnt += len(qas)
+        selected_cnt += len(selected)
+        if len(selected) >= 1:
+            with open(os.path.join(to_dir, item), 'w') as f:
+                json.dump(selected, f)
+    items2 = os.listdir(to_dir)
+    print('total_cnt: {}, selected_cnt: {}, number_cnt: {}'.format(total_cnt, selected_cnt, number_cnt))
+    print('imgs left: {}'.format(len(items2)))
+
+
 def create_index(data):
     data_img = {}
     data_q_id = {}
@@ -623,5 +661,96 @@ def create_index(data):
     return data_img, data_q_id
 
 
+
+def spoken_word_to_number(n):
+  
+    import re
+    _known = {
+        'zero': 0,
+        'one': 1,
+        'two': 2,
+        'three': 3,
+        'four': 4,
+        'five': 5,
+        'six': 6,
+        'seven': 7,
+        'eight': 8,
+        'nine': 9,
+        'ten': 10,
+        'eleven': 11,
+        'twelve': 12,
+        'thirteen': 13,
+        'fourteen': 14,
+        'fifteen': 15,
+        'sixteen': 16,
+        'seventeen': 17,
+        'eighteen': 18,
+        'nineteen': 19,
+        'twenty': 20,
+        'thirty': 30,
+        'forty': 40,
+        'fifty': 50,
+        'sixty': 60,
+        'seventy': 70,
+        'eighty': 80,
+        'ninety': 90
+    }
+    n = n.lower().strip()
+    if n in _known:
+        return _known[n]
+    else:
+        inputWordArr = re.split('[ -]', n)
+    assert len(inputWordArr) > 1, n
+    #Check the pathological case where hundred is at the end or thousand is at end
+    if inputWordArr[-1] == 'hundred':
+        inputWordArr.append('zero')
+        inputWordArr.append('zero')
+    if inputWordArr[-1] == 'thousand':
+        inputWordArr.append('zero')
+        inputWordArr.append('zero')
+        inputWordArr.append('zero')
+    if inputWordArr[0] == 'hundred':
+        inputWordArr.insert(0, 'one')
+    if inputWordArr[0] == 'thousand':
+        inputWordArr.insert(0, 'one')
+    inputWordArr = [word for word in inputWordArr if word not in ['and', 'minus', 'negative']]
+    currentPosition = 'unit'
+    output = 0
+    for word in reversed(inputWordArr):
+        if currentPosition == 'unit':
+            number = _known[word]
+            output += number
+            if number > 9:
+                currentPosition = 'hundred'
+            else:
+                currentPosition = 'ten'
+        elif currentPosition == 'ten':
+            if word != 'hundred':
+                number = _known[word]
+                if number < 10:
+                    output += number*10
+                else:
+                    output += number
+            #else: nothing special
+            currentPosition = 'hundred'
+        elif currentPosition == 'hundred':
+            if word not in [ 'hundred', 'thousand']:
+                number = _known[word]
+                output += number*100
+                currentPosition = 'thousand'
+            elif word == 'thousand':
+                currentPosition = 'thousand'
+            else:
+                currentPosition = 'hundred'
+        elif currentPosition == 'thousand':
+            assert word != 'hundred'
+            if word != 'thousand':
+                number = _known[word]
+                output += number*1000
+        else:
+            assert "Can't be here" == None
+    return output
+
+
 if __name__ == '__main__':
-    main22()
+    main24()

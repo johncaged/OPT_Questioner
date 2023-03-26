@@ -617,12 +617,14 @@ def main24():
     # filter 3129 qa in CC3M QA
     import pickle
     _dict = pickle.load(open('trainval_ans2label.pkl', 'rb'))
+    print(all([isinstance(key_item, str) for key_item in _dict.keys()]))
     ans = set(_dict.keys())
     print('this is nothing' in ans)
     
     total_cnt = 0
     selected_cnt = 0
     number_cnt = 0
+    cnt_dict = {}
     from_dir = '../CC3M_QA_3M_right_224_with_right_balanced_scaled_binary'
     to_dir = '../CC3M_QA_3M_3129'
     items = os.listdir(from_dir)
@@ -630,15 +632,21 @@ def main24():
         qas = json.load(open(os.path.join(from_dir, item)))
         selected = []
         for qa in qas:
-            if qa['answer'] in str(ans):
+            if qa['answer'] in ans:
                 selected.append(qa)
+                # count occurrence
+                _cnt = cnt_dict.setdefault(qa['answer'], 0)
+                cnt_dict[qa['answer']] += 1
             else:
                 try:
                     num_ans = str(spoken_word_to_number(qa['answer']))
                 except Exception:
                     num_ans = 'this is nothing'
-                if num_ans in str(ans):
+                if num_ans in ans:
                     qa['answer'] = num_ans
+                    # count occurrence
+                    _cnt = cnt_dict.setdefault(qa['answer'], 0)
+                    cnt_dict[qa['answer']] += 1
                     selected.append(qa)
                     number_cnt += 1
         total_cnt += len(qas)
@@ -649,6 +657,9 @@ def main24():
     items2 = os.listdir(to_dir)
     print('total_cnt: {}, selected_cnt: {}, number_cnt: {}'.format(total_cnt, selected_cnt, number_cnt))
     print('imgs left: {}'.format(len(items2)))
+    with open('count_3129_in_cc3m_qa.json', 'w') as f:
+        json.dump(cnt_dict, f)
+    print('occurrence in 3129: {}'.format(len(cnt_dict)))
 
 
 def create_index(data):

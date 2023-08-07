@@ -1,4 +1,4 @@
-# Enhancing Vision-Language Pre-Training with Jointly Learned Questioner and Dense Captioner
+# [ACM MM '23] Enhancing Vision-Language Pre-Training with Jointly Learned Questioner and Dense Captioner
 
 Official PyTorch implementation of the paper "Enhancing Vision-Language Pre-Training with Jointly Learned Questioner and Dense Captioner" (accepted by ACM MM '23).
 

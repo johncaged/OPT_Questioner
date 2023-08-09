@@ -17,6 +17,14 @@ Official PyTorch implementation of the paper "Enhancing Vision-Language Pre-Trai
 
 The text part of the CC3M-QA-DC dataset is available at [Google Drive](https://drive.google.com/file/d/17x6rnca7VHEsSWRkyaHOiwQYys2xfyYn/view?usp=share_link). There are total 89M QA pairs and 38M dense captions corresponding to 2.8M images in the dataset.
 
+#### Examples
+
+Here are two data examples in CC3M-QA-DC:
+
+<div align="center">
+  <img src="fig/example.png" width="60%" alt="Examples"/>
+</div>
+
 #### Dataset Format
 
 The QA pairs and dense captions (DC) are stored separately in two folders using the JSON format. In each folder, each JSON file is named after the id of the corresponding CC3M image (see "How to Get the IDs of the Images").
